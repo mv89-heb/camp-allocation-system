@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>מערכת בקרת מלאי דירות</title>
+    <title>מערכת בקרת מלאי דירות פנימייה</title>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
         :root {
@@ -14,93 +14,48 @@
             --text-muted: #64748b;
             --border: #e2e8f0;
             --th-bg: #f1f5f9;
-            
-            /* צבעי סטטוסים עדינים לעין */
             --danger-bg: #fef2f2; --danger-text: #b91c1c; --danger-border: #fca5a5;
             --success-bg: #f0fdf4; --success-text: #166534; --success-border: #86efac;
             --warning-bg: #fffbeb; --warning-text: #b45309; --warning-border: #fde68a;
         }
 
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background-color: var(--bg-color); 
-            color: var(--text-main); 
-            margin: 0; 
-            padding: 30px 20px; 
-        }
-        
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 30px 20px; }
         .container { max-width: 1300px; margin: 0 auto; }
-        
-        .header { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            margin-bottom: 25px; 
-            border-bottom: 2px solid var(--border);
-            padding-bottom: 15px;
-        }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
         h1 { margin: 0; font-size: 26px; font-weight: 700; color: #0f172a; }
         .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
-        
-        /* כפתור רענן */
-        .btn-refresh {
-            background-color: #ffffff; color: var(--text-main); border: 1px solid var(--border);
-            padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600;
-            cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s;
-        }
+        .btn-refresh { background-color: #ffffff; color: var(--text-main); border: 1px solid var(--border); padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
         .btn-refresh:hover { background-color: #f8fafc; border-color: #cbd5e1; }
+        
+        /* בורר מצבים חכם */
+        .mode-container { display: flex; gap: 10px; margin-bottom: 25px; }
+        .btn-mode { background-color: #ffffff; border: 1px solid var(--border); padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: var(--text-main); }
+        .btn-mode.active { background-color: var(--primary); color: white; border-color: var(--primary); }
 
-        /* כרטיסיית טופס הזנה */
-        .card { 
-            background-color: var(--card-bg); border-radius: 12px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.02); 
-            padding: 20px; margin-bottom: 25px; border: 1px solid var(--border); 
-        }
+        .card { background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 25px; border: 1px solid var(--border); }
         .card h3 { margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #334155; }
         .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
         .form-group { display: flex; flex-direction: column; }
         label { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #475569; }
-        input { 
-            padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; 
-            font-size: 14px; background-color: #f8fafc; transition: all 0.2s;
-        }
+        input { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background-color: #f8fafc; transition: all 0.2s; }
         input:focus { outline: none; border-color: var(--primary); background-color: #fff; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
         .btn-submit { background-color: var(--primary); color: white; border: none; padding: 11px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-submit:hover { background-color: var(--primary-hover); }
 
-        /* עיצוב הטבלה החדשה */
-        .table-container { 
-            background-color: var(--card-bg); border-radius: 12px; 
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid var(--border); 
-        }
+        .table-container { background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid var(--border); }
         table { width: 100%; border-collapse: collapse; text-align: center; }
-        
-        /* כותרות כפולות לקריאות מושלמת */
-        th { 
-            background-color: var(--th-bg); color: #475569; 
-            font-weight: 600; font-size: 13px; padding: 10px 8px;
-            border-bottom: 1px solid var(--border); border-left: 1px solid #e2e8f0;
-        }
+        th { background-color: var(--th-bg); color: #475569; font-weight: 600; font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--border); border-left: 1px solid #e2e8f0; }
         th.main-header { font-size: 14px; background-color: #e2e8f0; color: #1e293b; border-bottom: 2px solid #cbd5e1; }
-        
         td { padding: 12px 8px; border-bottom: 1px solid var(--border); border-left: 1px solid #f1f5f9; font-size: 14px; }
         tr:hover { background-color: #f8fafc; }
         
-        /* עיצוב מספרי נדרש וקיים */
         .num-req { color: var(--text-muted); font-size: 13px; }
         .num-act { font-weight: 600; color: #0f172a; }
-        
-        /* תגיות פערים וסטטוסים */
-        .badge { 
-            display: inline-block; padding: 4px 8px; border-radius: 6px; 
-            font-size: 12px; font-weight: 600; border: 1px solid transparent;
-        }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
         .bg-danger { background-color: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
         .bg-success { background-color: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
         .bg-warning { background-color: var(--warning-bg); color: var(--warning-text); border-color: var(--warning-border); }
-        
         .status-pill { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
-        
         .loading-text { padding: 40px; font-size: 16px; color: var(--text-muted); font-weight: 500; }
     </style>
 </head>
@@ -110,9 +65,14 @@
     <div class="header">
         <div>
             <h1>📊 דאשבורד בקרת מלאי דירות פנימייה</h1>
-            <div class="subtitle">השוואה שקופה ומדויקת בין תקן הציור הנדרש לבין הספירה הפיזית בפועל</div>
+            <div class="subtitle">ניהול חוסרים בזמן אמת מול תקן קבוע או תרחיש קיבולת מורחב</div>
         </div>
         <button class="btn-refresh" onclick="analyze()">🔄 רענן נתונים</button>
+    </div>
+
+    <div class="mode-container">
+        <button id="btn-std" class="btn-mode active" onclick="changeMode('std')">📌 תקן סטנדרטי קבוע (4 בחדר)</button>
+        <button id="btn-plan" class="btn-mode" onclick="changeMode('plan')">🚀 תקן מתוכנן מורחב (6 בחדר)</button>
     </div>
 
     <div class="card">
@@ -120,7 +80,7 @@
         <div class="form-row">
             <div class="form-group">
                 <label>מספר דירה / קרוון</label>
-                <input type="text" id="inpApt" placeholder="לדוגמה: 101 או קרוון 1" style="width: 160px;">
+                <input type="text" id="inpApt" placeholder="לדוגמה: חיפה 501" style="width: 160px;">
             </div>
             <div class="form-group">
                 <label>מיטות בפועל</label>
@@ -152,7 +112,7 @@
         <table>
             <thead>
                 <tr>
-                    <th rowspan="2" class="main-header" style="width: 120px; border-left: 2px solid #cbd5e1;">שם הדירה</th>
+                    <th rowspan="2" class="main-header" style="width: 150px; border-left: 2px solid #cbd5e1;">שם הדירה</th>
                     <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #eff6ff;">🛏️ מיטות</th>
                     <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #f0fdf4;">💤 מזרנים</th>
                     <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #fdf2f8;">🚪 ארונות</th>
@@ -176,6 +136,15 @@
 </div>
 
 <script>
+let currentMode = 'std';
+
+function changeMode(mode) {
+    currentMode = mode;
+    document.getElementById('btn-std').classList.toggle('active', mode === 'std');
+    document.getElementById('btn-plan').classList.toggle('active', mode === 'plan');
+    analyze();
+}
+
 async function saveInventory() {
     const data = {
         apartment: document.getElementById('inpApt').value,
@@ -200,7 +169,7 @@ async function saveInventory() {
 async function analyze() {
     let tbody = document.getElementById("tableBody");
     try {
-        let res = await axios.get("/analyze");
+        let res = await axios.get(`/analyze?mode=${currentMode}`);
         if (res.data.error) {
             tbody.innerHTML = `<tr><td colspan="17" style="color:red; padding:30px;">${res.data.error}</td></tr>`;
             return;
@@ -223,7 +192,6 @@ function renderTable(data) {
     data.forEach(row => {
         let tr = document.createElement("tr");
 
-        // פונקציית עזר ליצירת שלישיית עמודות (תקן, בפועל, פער) עם עיצוב ברור
         const createItemColumns = (req, act, gap) => {
             let gapBadge = "";
             if (gap < 0) {
@@ -241,7 +209,6 @@ function renderTable(data) {
             `;
         };
 
-        // עיצוב כפתור הסטטוס הכללי של החדר
         let statusClass = "status-pill badge ";
         let statusText = row.status ?? "תקין";
         statusClass += statusText.includes("חסר") ? "bg-danger" : "bg-success";
