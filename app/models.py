@@ -7,3 +7,4 @@ class ActualInventoryUpdate(BaseModel):
     closets: int = 0
     ac_units: int = 0
     ac_remotes: int = 0
+    
