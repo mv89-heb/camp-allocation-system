@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.models import ActualInventoryUpdate, DamageCreateRequest, FieldRoomRepo
 router = APIRouter(prefix="/field-api", tags=["field"])
 FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
+ROOM_NUMBER_RE = re.compile(r"(\d{3})$")
 
 
 def _matches(candidate: str | None, expected: str) -> bool:
@@ -25,9 +27,6 @@ def require_field_token(
     x_field_token: str | None = Header(default=None, alias="X-Field-Token"),
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> str:
-    # A field token authenticates only as a field reporter. An admin token may
-    # also use the field workflow, but a token sent in the field header is never
-    # silently promoted to admin privileges.
     if _matches(x_field_token, FIELD_TOKEN):
         return "field-reporter"
     if _matches(x_admin_token, ADMIN_TOKEN):
@@ -49,11 +48,14 @@ def _room_rows(db: Session):
     return requirements, actuals, names
 
 
+def _room_number(name: str) -> int:
+    match = ROOM_NUMBER_RE.search(str(name).strip())
+    return int(match.group(1)) if match else 9999
+
+
 def _room_group(name: str) -> tuple[int, str]:
     value = str(name).strip()
-    import re
-    match = re.search(r"(\d{3})$", value)
-    number = int(match.group(1)) if match else 9999
+    number = _room_number(value)
     if 101 <= number <= 108:
         return 1, "קומה 1"
     if 201 <= number <= 212:
@@ -68,7 +70,7 @@ def _room_group(name: str) -> tuple[int, str]:
 @router.get("/rooms")
 def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_token)):
     requirements, actuals, names = _room_rows(db)
-    names.sort(key=lambda name: (_room_group(name)[0], _room_group(name)[1], int(__import__('re').search(r'(\d{3})$', name).group(1)) if __import__('re').search(r'(\d{3})$', name) else 9999, name))
+    names.sort(key=lambda name: (_room_group(name)[0], _room_number(name), name))
     out = []
     for name in names:
         req = requirements.get(name)
