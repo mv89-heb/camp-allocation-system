@@ -8,16 +8,29 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or os.getenv("RENDER", "").strip().lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
+FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 
-# Never silently fall back to a local SQLite database in production/Render.
-# A silent fallback makes a deployment look healthy while all data is written locally
-# and disappears on the next instance replacement.
+# Production must use the real Neon/PostgreSQL database and explicit credentials.
+# Never silently fall back to SQLite and never start an exposed production API.
 if not DATABASE_URL:
     if IS_PRODUCTION:
         raise RuntimeError(
             "DATABASE_URL is required in production. Configure the Neon PostgreSQL connection string."
         )
     DATABASE_URL = "sqlite:///./data/inventory.db"
+
+if IS_PRODUCTION:
+    missing = []
+    if not ADMIN_TOKEN:
+        missing.append("ADMIN_TOKEN")
+    if not FIELD_TOKEN:
+        missing.append("FIELD_TOKEN")
+    if missing:
+        raise RuntimeError(
+            "Production authentication is not configured. Missing environment variables: "
+            + ", ".join(missing)
+        )
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
