@@ -9,6 +9,9 @@
 - תקן סטנדרטי ותקן מתוכנן.
 - עדכון מצאי עם ולידציה, transaction ו-audit trail.
 - הבחנה בין נתוני תקן לבין נתוני מצאי בפועל.
+- Snapshot הנתונים ב-`data/inventory.csv` וב-`data/actual_inventory.csv` מסונכרן ל-Neon אוטומטית בעת עליית Uvicorn בפרודקשן.
+- הסנכרון אינו מוחק טבלאות ואינו דורס מצאי שכבר סומן כבדיקה פיזית.
+- שורות snapshot עם אפס אמיתי נשארות "לא נבדק" ולא הופכות אוטומטית לחוסר מאומת.
 
 ### הקצאת קבוצות
 - הקצאה דטרמיניסטית לפי קיבולת מיטות.
@@ -81,6 +84,8 @@ python migrate_to_db.py
 ```
 
 הסקריפט idempotent ואינו משתמש ב-`if_exists="replace"`.
+
+בפרודקשן, `sitecustomize.py` מפעיל את `bootstrap_neon.py` אוטומטית לפני Uvicorn כאשר `DATABASE_URL` מוגדר. לכן הסנכרון אינו תלוי ב-Start Command שנשמר ידנית ב-Render.
 
 ## API
 
