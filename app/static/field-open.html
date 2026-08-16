@@ -4,15 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>דיווח שטח</title>
-<style>html,body{margin:0;width:100%;height:100%;background:#f4f6fa;font-family:Segoe UI,Tahoma,Arial,sans-serif}iframe{display:block;width:100%;height:100%;border:0}</style>
 </head>
 <body>
-<iframe id="field" title="דיווח שטח"></iframe>
 <script>
-// Current phase: authentication is intentionally omitted from the field workflow.
-// Set the compatibility token before loading the application so boot() can start directly.
 localStorage.setItem('camp_field_token','field-open-workflow');
-document.getElementById('field').src='/static/field-report.html';
+location.replace('/static/field-report.html');
 </script>
 </body>
 </html>
