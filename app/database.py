@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine
+from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
@@ -10,10 +10,7 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine_kwargs = {
-    "pool_pre_ping": True,
-    "future": True,
-}
+engine_kwargs = {"pool_pre_ping": True, "future": True}
 if not DATABASE_URL.startswith("sqlite"):
     engine_kwargs.update({"pool_size": 5, "max_overflow": 10})
 
@@ -58,6 +55,40 @@ class InventoryAuditDB(Base):
     apartment = Column(String(120), nullable=False, index=True)
     changed_at = Column(DateTime(timezone=True), nullable=False)
     changed_by = Column(String(120), nullable=False)
+    previous_values = Column(JSON, nullable=True)
+    new_values = Column(JSON, nullable=False)
+
+
+class DamageReportDB(Base):
+    __tablename__ = "damage_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    apartment = Column(String(120), nullable=False, index=True)
+    category = Column(String(40), nullable=False, index=True)
+    severity = Column(String(20), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="OPEN", index=True)
+    description = Column(Text, nullable=False)
+    estimated_cost = Column(Numeric(12, 2), nullable=True)
+    actual_cost = Column(Numeric(12, 2), nullable=True)
+    responsible_party = Column(String(160), nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    evidence_urls = Column(JSON, nullable=False, default=list)
+    reported_by = Column(String(120), nullable=False)
+    reported_at = Column(DateTime(timezone=True), nullable=False)
+    updated_by = Column(String(120), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DamageAuditDB(Base):
+    __tablename__ = "damage_audit"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    damage_id = Column(Integer, nullable=False, index=True)
+    apartment = Column(String(120), nullable=False, index=True)
+    changed_at = Column(DateTime(timezone=True), nullable=False)
+    changed_by = Column(String(120), nullable=False)
+    action = Column(String(30), nullable=False)
     previous_values = Column(JSON, nullable=True)
     new_values = Column(JSON, nullable=False)
 
