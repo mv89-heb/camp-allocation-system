@@ -109,6 +109,10 @@ python migrate_to_db.py
 - `POST /damages/{damage_id}/quotes` — הוספת הצעה.
 - `PATCH /damages/{damage_id}/quotes/{quote_id}` — עדכון הצעה.
 
+## מסד הנתונים
+
+`Base.metadata.create_all()` יוצר את הטבלאות החדשות באופן לא-הרסני בעת האתחול. לא נעשה שימוש ב-`DROP TABLE` או ב-`if_exists="replace"`.
+
 ## סטטוסי נזק
 
 המערכת אינה מאפשרת קפיצות שרירותיות בין סטטוסים. מעבר לסגירה/טיפול דורש הערות טיפול.
