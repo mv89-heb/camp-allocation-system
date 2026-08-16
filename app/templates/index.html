@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="same-origin">
   <title>מערכת הקצאת קמפוס ובקרת מלאי</title>
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.9.0/dist/axios.min.js" integrity="sha384-3h5M5J0Qm8h5z9qfZ4p5K5q5Q8l5Qn2rXjY9K0o7M9l8l8qJ6r1vQ2q0Q2Y3w6r6" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.9.0/dist/axios.min.js"></script>
   <style>
     :root{--bg:#f6f8fb;--card:#fff;--text:#172033;--muted:#667085;--line:#dfe4ea;--primary:#4f46e5;--danger:#b42318;--dangerbg:#fff1f0;--ok:#027a48;--okbg:#ecfdf3;--warn:#b54708;--warnbg:#fffaeb}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,Tahoma,Arial,sans-serif}main{max-width:1500px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:20px}.title{font-size:28px;font-weight:800}.muted{color:var(--muted);font-size:14px;margin-top:5px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 2px 8px #0000000a}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:700;color:#475467}.field input,.field select{min-width:90px;padding:10px;border:1px solid #cfd6df;border-radius:8px;background:#fff;font-size:14px}.field input:focus,.field select:focus{outline:3px solid #4f46e522;border-color:var(--primary)}button{border:0;border-radius:8px;padding:10px 15px;font-weight:700;cursor:pointer}.primary{background:var(--primary);color:#fff}.secondary{background:#fff;border:1px solid var(--line)}.danger{background:var(--dangerbg);color:var(--danger)}.hidden{display:none!important}.auth{max-width:430px;margin:10vh auto}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;min-width:1000px}th,td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:center}th{background:#f1f4f8;font-size:12px;position:sticky;top:0}td{font-size:13px}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:12px}.ok{background:var(--okbg);color:var(--ok)}.bad{background:var(--dangerbg);color:var(--danger)}.warn{background:var(--warnbg);color:var(--warn)}.error{color:var(--danger);font-weight:700}.success{color:var(--ok);font-weight:700}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.stat{font-size:13px;color:var(--muted)}
@@ -56,60 +56,18 @@
 const authRequired = {{ 'true' if auth_required else 'false' }};
 let token = sessionStorage.getItem('camp_admin_token') || '';
 let data = [];
-
 function apiConfig(){ return token ? {headers:{'X-Admin-Token':token}} : {}; }
 function show(id){document.getElementById(id).classList.remove('hidden')}
 function hide(id){document.getElementById(id).classList.add('hidden')}
-function login(){
-  const value=document.getElementById('token').value.trim();
-  if(!value){document.getElementById('authError').textContent='יש להזין מפתח גישה';return;}
-  token=value;sessionStorage.setItem('camp_admin_token',token);loadData(true);
-}
+function login(){const value=document.getElementById('token').value.trim();if(!value){document.getElementById('authError').textContent='יש להזין מפתח גישה';return}token=value;sessionStorage.setItem('camp_admin_token',token);loadData(true)}
 function logout(){sessionStorage.removeItem('camp_admin_token');token='';hide('app');if(authRequired)show('auth');else show('app')}
 function handleAuthError(err){if(err?.response?.status===401){sessionStorage.removeItem('camp_admin_token');token='';hide('app');show('auth');document.getElementById('authError').textContent='מפתח הגישה אינו תקין';return true}return false}
 function num(id){const n=Number(document.getElementById(id).value);return Number.isInteger(n)&&n>=0&&n<=1000?n:null}
-
-async function loadData(fromLogin=false){
-  try{
-    const res=await axios.get('/analyze',{params:{mode:document.getElementById('mode').value},...apiConfig()});
-    data=res.data;render(data);
-    if(authRequired){hide('auth');show('app')}
-    if(fromLogin)document.getElementById('authError').textContent='';
-  }catch(err){if(!handleAuthError(err)){document.getElementById('tableBody').innerHTML='<tr><td colspan="8" class="error">שגיאה בטעינת הנתונים</td></tr>'}}
-}
+async function loadData(fromLogin=false){try{const res=await axios.get('/analyze',{params:{mode:document.getElementById('mode').value},...apiConfig()});data=res.data;render(data);if(authRequired){hide('auth');show('app')}if(fromLogin)document.getElementById('authError').textContent=''}catch(err){if(!handleAuthError(err))document.getElementById('tableBody').innerHTML='<tr><td colspan="8" class="error">שגיאה בטעינת הנתונים</td></tr>'}}
 function cell(req,act,gap){const cls=gap<0?'bad':gap>0?'warn':'ok';return `<div>${req} / ${act} / <span class="badge ${cls}">${gap>0?'+':''}${gap}</span></div>`}
-function render(rows){
-  const body=document.getElementById('tableBody');body.innerHTML='';
-  let missing=0,extra=0,ok=0;
-  rows.forEach(row=>{
-    if(row.status==='חסר')missing++;else if(row.status==='עודף')extra++;else ok++;
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td><strong></strong></td><td>${cell(row.beds_req,row.beds_act,row.gap_beds)}</td><td>${cell(row.mattresses_req,row.mattresses_act,row.gap_mattresses)}</td><td>${cell(row.closets_req,row.closets_act,row.gap_closets)}</td><td>${cell(row.ac_units_req,row.ac_units_act,row.gap_ac_units)}</td><td>${cell(row.ac_remotes_req,row.ac_remotes_act,row.gap_ac_remotes)}</td><td><span class="badge ${row.status==='חסר'?'bad':row.status==='עודף'?'warn':'ok'}"></span></td><td><button class="secondary" onclick="showAudit(${JSON.stringify(row.apartment)})">היסטוריה</button></td>`;
-    tr.children[0].firstChild.textContent=row.apartment;
-    tr.children[6].firstChild.textContent=row.status;
-    body.appendChild(tr);
-  });
-  document.getElementById('summary').textContent=`חדרים: ${rows.length} • חסרים: ${missing} • עודפים: ${extra} • תקינים: ${ok}`;
-}
-async function saveInventory(){
-  const apartment=document.getElementById('apartment').value.trim();
-  const values={beds:num('beds'),mattresses:num('mattresses'),closets:num('closets'),ac_units:num('ac_units'),ac_remotes:num('ac_remotes')};
-  if(!apartment||Object.values(values).some(v=>v===null)){document.getElementById('saveMessage').textContent='יש למלא דירה וכל הכמויות במספרים תקינים';return}
-  try{
-    await axios.post('/update_actual',{apartment,...values},apiConfig());
-    document.getElementById('saveMessage').textContent='הדיווח נשמר בהצלחה';
-    loadData();
-  }catch(err){if(!handleAuthError(err))document.getElementById('saveMessage').textContent='השמירה נכשלה'}
-}
-async function showAudit(apartment){
-  try{
-    const res=await axios.get('/audit/'+encodeURIComponent(apartment),apiConfig());
-    if(!res.data.length){alert('אין היסטוריית שינויים לדירה זו');return}
-    const text=res.data.map(x=>`${new Date(x.changed_at).toLocaleString('he-IL')} — ${x.changed_by}\n${JSON.stringify(x.previous_values)} → ${JSON.stringify(x.new_values)}`).join('\n\n');
-    alert(`היסטוריה: ${apartment}\n\n${text}`)
-  }catch(err){if(!handleAuthError(err))alert('לא ניתן לטעון היסטוריה')}
-}
-
+function render(rows){const body=document.getElementById('tableBody');body.innerHTML='';let missing=0,extra=0,ok=0;rows.forEach(row=>{if(row.status==='חסר')missing++;else if(row.status==='עודף')extra++;else ok++;const tr=document.createElement('tr');tr.innerHTML=`<td><strong></strong></td><td>${cell(row.beds_req,row.beds_act,row.gap_beds)}</td><td>${cell(row.mattresses_req,row.mattresses_act,row.gap_mattresses)}</td><td>${cell(row.closets_req,row.closets_act,row.gap_closets)}</td><td>${cell(row.ac_units_req,row.ac_units_act,row.gap_ac_units)}</td><td>${cell(row.ac_remotes_req,row.ac_remotes_act,row.gap_ac_remotes)}</td><td><span class="badge ${row.status==='חסר'?'bad':row.status==='עודף'?'warn':'ok'}"></span></td><td><button class="secondary" onclick="showAudit(${JSON.stringify(row.apartment)})">היסטוריה</button></td>`;tr.children[0].firstChild.textContent=row.apartment;tr.children[6].firstChild.textContent=row.status;body.appendChild(tr)});document.getElementById('summary').textContent=`חדרים: ${rows.length} • חסרים: ${missing} • עודפים: ${extra} • תקינים: ${ok}`}
+async function saveInventory(){const apartment=document.getElementById('apartment').value.trim();const values={beds:num('beds'),mattresses:num('mattresses'),closets:num('closets'),ac_units:num('ac_units'),ac_remotes:num('ac_remotes')};if(!apartment||Object.values(values).some(v=>v===null)){document.getElementById('saveMessage').textContent='יש למלא דירה וכל הכמויות במספרים תקינים';return}try{await axios.post('/update_actual',{apartment,...values},apiConfig());document.getElementById('saveMessage').textContent='הדיווח נשמר בהצלחה';loadData()}catch(err){if(!handleAuthError(err))document.getElementById('saveMessage').textContent='השמירה נכשלה'}}
+async function showAudit(apartment){try{const res=await axios.get('/audit/'+encodeURIComponent(apartment),apiConfig());if(!res.data.length){alert('אין היסטוריית שינויים לדירה זו');return}const text=res.data.map(x=>`${new Date(x.changed_at).toLocaleString('he-IL')} — ${x.changed_by}\n${JSON.stringify(x.previous_values)} → ${JSON.stringify(x.new_values)}`).join('\n\n');alert(`היסטוריה: ${apartment}\n\n${text}`)}catch(err){if(!handleAuthError(err))alert('לא ניתן לטעון היסטוריה')}}
 if(authRequired){show('auth');if(token)loadData()}else{show('app');loadData()}
 </script>
 </body>
