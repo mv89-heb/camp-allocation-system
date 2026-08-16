@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5"><link rel="manifest" href="/static/manifest.json">
+<title>דיווח שטח | מערכת הקמפוס</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#172033;font-family:Segoe UI,Tahoma,Arial,sans-serif}.app{max-width:760px;margin:auto;padding:14px 14px 30px}.top{position:sticky;top:0;background:#f4f6faf5;backdrop-filter:blur(10px);padding-bottom:10px;z-index:3}.title{font-size:25px;font-weight:950}.sub{font-size:13px;color:#667085;margin-top:4px}.search{width:100%;padding:14px;margin-top:12px;border:1px solid #cbd3df;border-radius:13px;font-size:17px;background:#fff}.group{background:#fff;border:1px solid #d9dee7;border-radius:16px;margin-top:12px;overflow:hidden}.head{padding:12px 14px;background:#f8fafc;display:flex;justify-content:space-between}.head b{font-size:15px}.head span{font-size:11px;color:#667085}.rooms{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:9px}.room{border:1px solid #d9dee7;background:#fff;border-radius:13px;padding:13px;text-align:right;min-height:66px;font-weight:900;font-size:16px}.state{display:block;font-size:11px;color:#667085;margin-top:5px;font-weight:700}.checked{background:#f7fffa;border-color:#b7e1c9}.gap{background:#fff8f7;border-color:#efc3be}.damage{box-shadow:inset 4px 0 #b42318}.empty{text-align:center;padding:30px;color:#667085}.hidden{display:none!important}@media(min-width:650px){.rooms{grid-template-columns:repeat(4,1fr)}}
+</style></head>
+<body><div class="app"><header class="top"><div class="title">📱 דיווח שטח</div><div class="sub">בחר חדר. בדוק מה קיים בפועל, דווח על נזקים ושמור.</div><input id="search" class="search" placeholder="🔎 חיפוש חדר..." oninput="render()"></header><main id="list"><div class="empty">טוען...</div></main></div>
+<script>
+let rooms=[];
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+const n=v=>Number.isFinite(Number(v))?Number(v):0;
+function roomNo(s){const m=String(s||'').match(/(\d{3})$/);return m?Number(m[1]):null}
+function group(s){const x=roomNo(s),t=String(s||'');if(x>=101&&x<=108)return['1','🏢 קומה 1','101–108'];if(x>=201&&x<=212)return['2','🏢 קומה 2','201–212'];if(x>=301&&x<=313)return['3','🏢 קומה 3','301–313'];if(/^קרוון(?:\s|$)/.test(t))return['4','🏕️ מתחם קרוואנים','כל הקרוואנים'];return['5','📦 יחידות נוספות','יתר היחידות']}
+function gap(r){return ['beds','mattresses','closets','ac_units','ac_remotes'].some(k=>n(r[k+'_act'])!==n(r[k+'_req']))}
+function state(r){if(!r.inventory_checked)return['טרם נבדק',''];if(gap(r))return['יש פער','gap'];return['נבדק ותקין','checked']}
+function render(){const q=document.getElementById('search').value.trim().toLowerCase();const filtered=rooms.filter(r=>!q||String(r.apartment).toLowerCase().includes(q));const groups={};filtered.forEach(r=>{const g=group(r.apartment);(groups[g[0]]??=[]).push(r)});let html='';Object.keys(groups).sort().forEach(k=>{const first=group(groups[k][0].apartment);groups[k].sort((a,b)=>(roomNo(a.apartment)||9999)-(roomNo(b.apartment)||9999));html+=`<section class="group"><div class="head"><b>${first[1]}</b><span>${first[2]}</span></div><div class="rooms">${groups[k].map(r=>{const st=state(r);const damage=Number(r.open_damages||0)>0;return `<button class="room ${st[1]} ${damage?'damage':''}" onclick="openRoom('${encodeURIComponent(r.apartment)}')">${esc(r.apartment)}<span class="state">${damage?'🛠️ נזק פתוח · ':''}${st[0]}</span></button>`}).join('')}</div></section>`});document.getElementById('list').innerHTML=html||'<div class="empty">לא נמצא חדר.</div>'}
+function openRoom(name){window.location.href='/static/inspection.html?room='+name}
+async function load(){try{const r=await fetch('/analyze?mode=std');if(!r.ok)throw Error('לא ניתן לטעון את רשימת החדרים');rooms=await r.json();let d=[];try{const x=await fetch('/damages');if(x.ok)d=await x.json()}catch{}const counts={};d.filter(x=>['OPEN','INSPECTION','IN_PROGRESS'].includes(x.status)).forEach(x=>counts[x.apartment]=(counts[x.apartment]||0)+1);rooms=rooms.map(x=>({...x,open_damages:counts[x.apartment]||0}));render()}catch(e){document.getElementById('list').innerHTML='<div class="empty">❌ '+esc(e.message)+'</div>'}}load();
+</script></body></html>
