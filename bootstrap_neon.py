@@ -118,17 +118,22 @@ def main() -> None:
                 added_actual += 1
                 continue
 
-            # Bootstrap may restore only rows that have never been checked.
-            # This protects any physical count entered by a real operator.
+            # Only rows that have never been checked may be restored from the
+            # repository snapshot. A non-zero source snapshot is authoritative for
+            # an unchecked row, even when the database contains an older non-zero
+            # value. A zero source snapshot never erases an existing non-zero value.
             if actual.checked_at is None:
                 current = {field: int(getattr(actual, field) or 0) for field in FIELDS}
-                if current != values and (all(v == 0 for v in current.values()) or not any(current.values())):
-                    for field, value in values.items():
-                        setattr(actual, field, value)
-                    if any(values.values()):
-                        actual.checked_at = now
-                        actual.checked_by = "repository-bootstrap"
-                    repaired_actual += 1
+                if any(values.values()):
+                    if current != values:
+                        for field, value in values.items():
+                            setattr(actual, field, value)
+                        repaired_actual += 1
+                    actual.checked_at = now
+                    actual.checked_by = "repository-bootstrap"
+                elif all(v == 0 for v in current.values()):
+                    # Keep genuine zero snapshots explicitly unverified.
+                    pass
 
         db.commit()
     except Exception:
