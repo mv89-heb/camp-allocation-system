@@ -1,10 +1,16 @@
-"""Idempotently migrate legacy CSV data into the canonical database schema.
+"""One-time legacy CSV bootstrap for local development.
 
-This script never uses if_exists='replace' and therefore does not destroy existing
-rows or ORM constraints. Run it once after deploying the hardened version.
+IMPORTANT:
+- This script is NOT a Render/production build step.
+- Production/Render deployments must use the configured PostgreSQL/Neon DATABASE_URL
+  and let app.main.ensure_schema() perform only non-destructive schema upgrades.
+- The script refuses to import CSV data when running in production/Render so an old
+  Render Build Command cannot silently overwrite the Neon database.
 """
 
 from __future__ import annotations
+
+import os
 
 import pandas as pd
 from sqlalchemy import select
@@ -14,6 +20,12 @@ from app.main import ensure_schema
 
 
 FIELDS = ("beds", "mattresses", "closets", "ac_units", "ac_remotes")
+
+
+def _is_production() -> bool:
+    environment = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).strip().lower()
+    render = os.getenv("RENDER", "").strip().lower()
+    return environment in {"production", "prod"} or render == "true"
 
 
 def non_negative(value, default=0) -> int:
@@ -74,6 +86,13 @@ def migrate_actuals(session):
 
 
 def main():
+    if _is_production():
+        raise SystemExit(
+            "Refusing CSV-to-DB migration in production/Render. "
+            "Use DATABASE_URL pointing to Neon and let the application perform "
+            "the non-destructive schema upgrade."
+        )
+
     Base.metadata.create_all(bind=engine)
     ensure_schema()
     with SessionLocal.begin() as session:
