@@ -17,9 +17,29 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.database import ActualDB, Base, InventoryAuditDB, RequirementDB, engine, get_db, utc_now
+from app.database import (
+    ActualDB,
+    Base,
+    DamageAuditDB,
+    DamageReportDB,
+    InventoryAuditDB,
+    RequirementDB,
+    engine,
+    get_db,
+    utc_now,
+)
 from app.logic import compute_gaps, dataframe_to_records
-from app.models import ActualInventoryUpdate, AllocationRequest, HealthResponse
+from app.models import (
+    DAMAGE_CATEGORIES,
+    DAMAGE_SEVERITIES,
+    DAMAGE_STATUSES,
+    STATUS_TRANSITIONS,
+    ActualInventoryUpdate,
+    AllocationRequest,
+    DamageCreateRequest,
+    DamageUpdateRequest,
+    HealthResponse,
+)
 from app.rules import assign_groups
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -30,7 +50,7 @@ STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Camp Allocation System", version="2.0.0")
+app = FastAPI(title="Camp Allocation System", version="2.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 allowed_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
@@ -53,6 +73,10 @@ def _safe_token_equal(candidate: str | None) -> bool:
 def require_auth(x_admin_token: str | None = Header(default=None, alias="X-Admin-Token")) -> None:
     if not _safe_token_equal(x_admin_token):
         raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def _actor(x_admin_token: str | None) -> str:
+    return "admin" if not x_admin_token else "token-user"
 
 
 def _legacy_columns(table_name: str) -> set[str]:
@@ -86,8 +110,6 @@ def ensure_schema() -> None:
             for name, definition in additions.items():
                 if name not in existing:
                     conn.execute(text(f'ALTER TABLE requirements ADD COLUMN "{name}" {definition}'))
-            # Legacy tables used generic columns. Copy them unconditionally into the new plan
-            # columns so the default value does not mask the original source data.
             legacy_map = {
                 "beds": ("beds_std", "beds_plan", 4),
                 "mattresses": ("mattresses_std", "mattresses_plan", 4),
@@ -97,11 +119,14 @@ def ensure_schema() -> None:
             }
             for legacy, (std_col, plan_col, std_cap) in legacy_map.items():
                 if legacy in existing:
-                    conn.execute(text(
-                        f'UPDATE requirements SET "{plan_col}" = CAST("{legacy}" AS INTEGER), '
-                        f'"{std_col}" = CASE WHEN CAST("{legacy}" AS INTEGER) < :cap '
-                        f'THEN CAST("{legacy}" AS INTEGER) ELSE :cap END'
-                    ), {"cap": std_cap})
+                    conn.execute(
+                        text(
+                            f'UPDATE requirements SET "{plan_col}" = CAST("{legacy}" AS INTEGER), '
+                            f'"{std_col}" = CASE WHEN CAST("{legacy}" AS INTEGER) < :cap '
+                            f'THEN CAST("{legacy}" AS INTEGER) ELSE :cap END'
+                        ),
+                        {"cap": std_cap},
+                    )
 
     if actuals:
         with engine.begin() as conn:
@@ -154,11 +179,15 @@ def analyze(mode: str = "std", _: None = Depends(require_auth)):
 
 
 @app.post("/update_actual")
-def update_actual_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), x_admin_token: str | None = Header(default=None, alias="X-Admin-Token")):
+def update_actual_inventory(
+    data: ActualInventoryUpdate,
+    db: Session = Depends(get_db),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
     if not _safe_token_equal(x_admin_token):
         raise HTTPException(status_code=401, detail="Authentication required")
     apartment_name = data.apartment
-    actor = "admin" if not x_admin_token else "token-user"
+    actor = _actor(x_admin_token)
     values = {field: getattr(data, field) for field in ("beds", "mattresses", "closets", "ac_units", "ac_remotes")}
     try:
         record = db.scalar(select(ActualDB).where(ActualDB.apartment == apartment_name).with_for_update())
@@ -190,15 +219,23 @@ def audit(apartment: str, db: Session = Depends(get_db), _: None = Depends(requi
     apartment = apartment.strip()
     if not apartment:
         raise HTTPException(status_code=400, detail="Apartment is required")
-    rows = db.scalars(select(InventoryAuditDB).where(InventoryAuditDB.apartment == apartment).order_by(InventoryAuditDB.changed_at.desc()).limit(100)).all()
-    return [{
-        "id": row.id,
-        "apartment": row.apartment,
-        "changed_at": row.changed_at.astimezone(timezone.utc).isoformat(),
-        "changed_by": row.changed_by,
-        "previous_values": row.previous_values,
-        "new_values": row.new_values,
-    } for row in rows]
+    rows = db.scalars(
+        select(InventoryAuditDB)
+        .where(InventoryAuditDB.apartment == apartment)
+        .order_by(InventoryAuditDB.changed_at.desc())
+        .limit(100)
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "apartment": row.apartment,
+            "changed_at": row.changed_at.astimezone(timezone.utc).isoformat(),
+            "changed_by": row.changed_by,
+            "previous_values": row.previous_values,
+            "new_values": row.new_values,
+        }
+        for row in rows
+    ]
 
 
 @app.post("/allocate")
@@ -207,3 +244,187 @@ def allocate(request: AllocationRequest, db: Session = Depends(get_db), _: None 
     rooms = pd.DataFrame([{"room": apartment, "actual_capacity": beds} for apartment, beds in rows])
     assignments = assign_groups(rooms, [group.model_dump() for group in request.groups], allow_split=request.allow_split) if not rooms.empty else []
     return {"assignments": assignments}
+
+
+DAMAGE_OUTPUT_FIELDS = (
+    "id", "apartment", "category", "severity", "status", "description", "estimated_cost",
+    "actual_cost", "responsible_party", "resolution_notes", "evidence_urls", "reported_by",
+    "reported_at", "updated_by", "updated_at", "resolved_at",
+)
+
+
+def _damage_dict(row: DamageReportDB) -> dict:
+    return {
+        "id": row.id,
+        "apartment": row.apartment,
+        "category": row.category,
+        "severity": row.severity,
+        "status": row.status,
+        "description": row.description,
+        "estimated_cost": float(row.estimated_cost) if row.estimated_cost is not None else None,
+        "actual_cost": float(row.actual_cost) if row.actual_cost is not None else None,
+        "responsible_party": row.responsible_party,
+        "resolution_notes": row.resolution_notes,
+        "evidence_urls": row.evidence_urls or [],
+        "reported_by": row.reported_by,
+        "reported_at": row.reported_at.astimezone(timezone.utc).isoformat(),
+        "updated_by": row.updated_by,
+        "updated_at": row.updated_at.astimezone(timezone.utc).isoformat(),
+        "resolved_at": row.resolved_at.astimezone(timezone.utc).isoformat() if row.resolved_at else None,
+    }
+
+
+def _room_exists(db: Session, apartment: str) -> bool:
+    return db.scalar(select(RequirementDB.apartment).where(RequirementDB.apartment == apartment)) is not None or db.scalar(select(ActualDB.apartment).where(ActualDB.apartment == apartment)) is not None
+
+
+def _damage_snapshot(row: DamageReportDB) -> dict:
+    return _damage_dict(row)
+
+
+@app.get("/damages")
+def list_damages(
+    apartment: str | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    category: str | None = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_auth),
+):
+    query = select(DamageReportDB)
+    if apartment:
+        query = query.where(DamageReportDB.apartment == apartment.strip())
+    if status:
+        status = status.upper()
+        if status not in DAMAGE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid damage status")
+        query = query.where(DamageReportDB.status == status)
+    if severity:
+        severity = severity.upper()
+        if severity not in DAMAGE_SEVERITIES:
+            raise HTTPException(status_code=400, detail="Invalid damage severity")
+        query = query.where(DamageReportDB.severity == severity)
+    if category:
+        category = category.upper()
+        if category not in DAMAGE_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Invalid damage category")
+        query = query.where(DamageReportDB.category == category)
+    rows = db.scalars(query.order_by(DamageReportDB.updated_at.desc()).limit(1000)).all()
+    return [_damage_dict(row) for row in rows]
+
+
+@app.post("/damages", status_code=201)
+def create_damage(
+    data: DamageCreateRequest,
+    db: Session = Depends(get_db),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    if not _safe_token_equal(x_admin_token):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not _room_exists(db, data.apartment):
+        raise HTTPException(status_code=404, detail="Room/apartment does not exist")
+    actor = _actor(x_admin_token)
+    now = utc_now()
+    row = DamageReportDB(
+        apartment=data.apartment,
+        category=data.category,
+        severity=data.severity,
+        status="OPEN",
+        description=data.description,
+        estimated_cost=data.estimated_cost,
+        responsible_party=data.responsible_party,
+        resolution_notes=data.resolution_notes,
+        evidence_urls=data.evidence_urls,
+        reported_by=actor,
+        reported_at=now,
+        updated_by=actor,
+        updated_at=now,
+    )
+    db.add(row)
+    db.flush()
+    db.add(DamageAuditDB(
+        damage_id=row.id,
+        apartment=row.apartment,
+        changed_at=now,
+        changed_by=actor,
+        action="CREATED",
+        previous_values=None,
+        new_values=_damage_snapshot(row),
+    ))
+    db.commit()
+    db.refresh(row)
+    return _damage_dict(row)
+
+
+@app.get("/damages/{damage_id}")
+def get_damage(damage_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
+    row = db.get(DamageReportDB, damage_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Damage report not found")
+    return _damage_dict(row)
+
+
+@app.patch("/damages/{damage_id}")
+def update_damage(
+    damage_id: int,
+    data: DamageUpdateRequest,
+    db: Session = Depends(get_db),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    if not _safe_token_equal(x_admin_token):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    row = db.get(DamageReportDB, damage_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Damage report not found")
+    actor = _actor(x_admin_token)
+    previous = _damage_snapshot(row)
+    changes = data.model_dump(exclude_unset=True)
+    new_status = changes.get("status")
+    if new_status and new_status not in STATUS_TRANSITIONS[row.status]:
+        raise HTTPException(status_code=409, detail=f"Invalid status transition: {row.status} -> {new_status}")
+    for field, value in changes.items():
+        setattr(row, field, value)
+    now = utc_now()
+    row.updated_at = now
+    row.updated_by = actor
+    if row.status in {"RESOLVED", "CLOSED"} and row.resolved_at is None:
+        row.resolved_at = now
+    if row.status not in {"RESOLVED", "CLOSED"}:
+        row.resolved_at = None
+    db.add(DamageAuditDB(
+        damage_id=row.id,
+        apartment=row.apartment,
+        changed_at=now,
+        changed_by=actor,
+        action="UPDATED",
+        previous_values=previous,
+        new_values=_damage_snapshot(row),
+    ))
+    db.commit()
+    db.refresh(row)
+    return _damage_dict(row)
+
+
+@app.get("/damages/{damage_id}/audit")
+def damage_audit(damage_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
+    if db.get(DamageReportDB, damage_id) is None:
+        raise HTTPException(status_code=404, detail="Damage report not found")
+    rows = db.scalars(
+        select(DamageAuditDB)
+        .where(DamageAuditDB.damage_id == damage_id)
+        .order_by(DamageAuditDB.changed_at.desc())
+        .limit(100)
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "damage_id": row.damage_id,
+            "apartment": row.apartment,
+            "changed_at": row.changed_at.astimezone(timezone.utc).isoformat(),
+            "changed_by": row.changed_by,
+            "action": row.action,
+            "previous_values": row.previous_values,
+            "new_values": row.new_values,
+        }
+        for row in rows
+    ]
