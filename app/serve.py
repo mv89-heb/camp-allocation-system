@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 import os
-import sys
 
 
 def _require(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        print(f"FATAL: required production environment variable {name} is missing", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(f"FATAL: required environment variable {name} is missing")
     return value
 
 
-# Render production must never start the application without both scopes.
+# For the current phase only the Neon database connection is mandatory.
+# Authentication is intentionally deferred; the field workflow must be usable
+# without ADMIN_TOKEN/FIELD_TOKEN configuration.
 if os.getenv("RENDER", "").strip().lower() == "true" or os.getenv("DATABASE_URL", "").strip():
     _require("DATABASE_URL")
-    _require("ADMIN_TOKEN")
-    _require("FIELD_TOKEN")
 
 import uvicorn
 
