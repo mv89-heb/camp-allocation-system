@@ -10,9 +10,12 @@ def _require(name: str) -> str:
     return value
 
 
-# For the current phase only the Neon database connection is mandatory.
-# Authentication is intentionally deferred; the field workflow must be usable
-# without ADMIN_TOKEN/FIELD_TOKEN configuration.
+# Current operational phase: authentication is disabled.
+# Remove legacy auth secrets from the process before app.main is imported,
+# so an old Render environment variable cannot accidentally re-enable login.
+os.environ.pop("ADMIN_TOKEN", None)
+os.environ.pop("FIELD_TOKEN", None)
+
 if os.getenv("RENDER", "").strip().lower() == "true" or os.getenv("DATABASE_URL", "").strip():
     _require("DATABASE_URL")
 
