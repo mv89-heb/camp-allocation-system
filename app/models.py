@@ -23,7 +23,6 @@ STATUS_TRANSITIONS = {
 
 class ActualInventoryUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
     apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
     beds: NonNegativeInt = 0
     mattresses: NonNegativeInt = 0
@@ -41,21 +40,18 @@ class ActualInventoryUpdate(BaseModel):
 
 class GroupAllocationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
     name: str = Field(min_length=1, max_length=120)
     size: NonNegativeInt
 
 
 class AllocationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     groups: list[GroupAllocationRequest] = Field(min_length=1, max_length=1000)
     allow_split: bool = False
 
 
 class DamageCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
     apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
     category: str = Field(min_length=2, max_length=40)
     severity: str = Field(default="MEDIUM", min_length=3, max_length=20)
@@ -91,9 +87,21 @@ class DamageCreateRequest(BaseModel):
         return values
 
 
+class FieldRoomReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    inventory: ActualInventoryUpdate
+    damages: list[DamageCreateRequest] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_damage_rooms(self):
+        for damage in self.damages:
+            if damage.apartment != self.inventory.apartment:
+                raise ValueError("All damages must belong to the reported room")
+        return self
+
+
 class DamageUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
     severity: str | None = None
     status: str | None = None
     description: str | None = Field(default=None, min_length=5, max_length=5000)
