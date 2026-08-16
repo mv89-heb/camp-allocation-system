@@ -15,22 +15,22 @@ FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 
 
-def _authorized(token: str | None) -> bool:
-    if not FIELD_TOKEN and not ADMIN_TOKEN:
-        return True
-    if not token:
+def _matches(candidate: str | None, expected: str) -> bool:
+    if not candidate or not expected:
         return False
-    candidate = hashlib.sha256(token.encode()).digest()
-    return any(candidate == hashlib.sha256(value.encode()).digest() for value in (FIELD_TOKEN, ADMIN_TOKEN) if value)
+    return hashlib.sha256(candidate.encode()).digest() == hashlib.sha256(expected.encode()).digest()
 
 
 def require_field_token(
     x_field_token: str | None = Header(default=None, alias="X-Field-Token"),
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> str:
-    if x_field_token and _authorized(x_field_token):
+    # A field token authenticates only as a field reporter. An admin token may
+    # also use the field workflow, but a token sent in the field header is never
+    # silently promoted to admin privileges.
+    if _matches(x_field_token, FIELD_TOKEN):
         return "field-reporter"
-    if x_admin_token and _authorized(x_admin_token):
+    if _matches(x_admin_token, ADMIN_TOKEN):
         return "admin"
     raise HTTPException(status_code=401, detail="Field authentication required")
 
@@ -49,9 +49,26 @@ def _room_rows(db: Session):
     return requirements, actuals, names
 
 
+def _room_group(name: str) -> tuple[int, str]:
+    value = str(name).strip()
+    import re
+    match = re.search(r"(\d{3})$", value)
+    number = int(match.group(1)) if match else 9999
+    if 101 <= number <= 108:
+        return 1, "קומה 1"
+    if 201 <= number <= 212:
+        return 2, "קומה 2"
+    if 301 <= number <= 313:
+        return 3, "קומה 3"
+    if value.startswith("קרוון"):
+        return 4, "מתחם קרוואנים"
+    return 5, "יחידות נוספות"
+
+
 @router.get("/rooms")
 def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_token)):
     requirements, actuals, names = _room_rows(db)
+    names.sort(key=lambda name: (_room_group(name)[0], _room_group(name)[1], int(__import__('re').search(r'(\d{3})$', name).group(1)) if __import__('re').search(r'(\d{3})$', name) else 9999, name))
     out = []
     for name in names:
         req = requirements.get(name)
@@ -66,6 +83,7 @@ def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_to
         )
         out.append({
             "apartment": name,
+            "group": _room_group(name)[1],
             "beds_req": getattr(req, "beds_std", 0) if req else 0,
             "mattresses_req": getattr(req, "mattresses_std", 0) if req else 0,
             "closets_req": getattr(req, "closets_std", 0) if req else 0,
@@ -161,18 +179,22 @@ def field_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), 
     record = db.scalar(select(ActualDB).where(ActualDB.apartment == data.apartment).with_for_update())
     previous = None
     now = utc_now()
-    if record is None:
-        record = ActualDB(apartment=data.apartment, **values)
-        db.add(record)
-    else:
-        previous = {f: getattr(record, f) for f in values}
-        for f, v in values.items():
-            setattr(record, f, v)
-    record.checked_at = now
-    record.checked_by = actor
-    db.add(InventoryAuditDB(apartment=data.apartment, changed_at=now, changed_by=actor, previous_values=previous, new_values=values))
-    db.commit()
-    return {"status": "success", "apartment": data.apartment, "checked_at": record.checked_at}
+    try:
+        if record is None:
+            record = ActualDB(apartment=data.apartment, **values)
+            db.add(record)
+        else:
+            previous = {f: getattr(record, f) for f in values}
+            for f, v in values.items():
+                setattr(record, f, v)
+        record.checked_at = now
+        record.checked_by = actor
+        db.add(InventoryAuditDB(apartment=data.apartment, changed_at=now, changed_by=actor, previous_values=previous, new_values=values))
+        db.commit()
+        return {"status": "success", "apartment": data.apartment, "checked_at": record.checked_at}
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/damages", status_code=201)
@@ -188,12 +210,16 @@ def field_damage(data: DamageCreateRequest, db: Session = Depends(get_db), actor
         updated_by=actor, updated_at=now,
     )
     db.add(row)
-    db.flush()
-    db.add(DamageAuditDB(
-        damage_id=row.id, apartment=row.apartment, changed_at=now, changed_by=actor,
-        action="CREATED", previous_values=None,
-        new_values={"id": row.id, "apartment": row.apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description},
-    ))
-    db.commit()
-    db.refresh(row)
-    return {"id": row.id, "status": row.status, "apartment": row.apartment}
+    try:
+        db.flush()
+        db.add(DamageAuditDB(
+            damage_id=row.id, apartment=row.apartment, changed_at=now, changed_by=actor,
+            action="CREATED", previous_values=None,
+            new_values={"id": row.id, "apartment": row.apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description},
+        ))
+        db.commit()
+        db.refresh(row)
+        return {"id": row.id, "status": row.status, "apartment": row.apartment}
+    except Exception:
+        db.rollback()
+        raise
