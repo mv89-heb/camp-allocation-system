@@ -28,6 +28,7 @@ from app.database import (
     get_db,
     utc_now,
 )
+from app.damage_extended import router as damage_extended_router
 from app.logic import compute_gaps, dataframe_to_records
 from app.models import (
     DAMAGE_CATEGORIES,
@@ -50,12 +51,13 @@ STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Camp Allocation System", version="2.1.0")
+app = FastAPI(title="Camp Allocation System", version="2.2.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 allowed_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.include_router(damage_extended_router)
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 AUTH_REQUIRED = bool(ADMIN_TOKEN)
