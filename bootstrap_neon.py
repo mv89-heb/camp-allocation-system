@@ -1,13 +1,19 @@
 """Safely reconcile the versioned room snapshot with the Neon database.
 
+The repository snapshot is reference data, not a physical inspection.
+A room imported from ``actual_inventory.csv`` must therefore remain
+``unchecked`` until a user explicitly saves a physical inventory check.
+
 Rules:
 - Neon is the production database; never drop or replace tables.
 - requirements are reconciled to the repository's canonical inventory.csv snapshot.
-- actual inventory is restored from actual_inventory.csv only when a room has never
-  been physically checked in the database.
-- a real zero snapshot remains zero and *unchecked*; it is never converted into a
-  confirmed shortage.
-- an already checked actual inventory row is never overwritten by bootstrap.
+- actual inventory values are restored from actual_inventory.csv without marking
+  the room as physically checked.
+- a real zero snapshot remains zero and unchecked.
+- an already physically checked actual inventory row is never overwritten.
+- rows created by older versions of this bootstrap (checked_by=
+  ``repository-bootstrap``) are repaired back to unchecked because that marker
+  never represented a physical inspection.
 
 The script is idempotent and safe to run on every Render start.
 """
@@ -19,7 +25,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.database import ActualDB, Base, RequirementDB, SessionLocal, engine, utc_now
+from app.database import ActualDB, Base, RequirementDB, SessionLocal, engine
 from app.main import ensure_schema
 
 ROOT = Path(__file__).resolve().parent
@@ -75,11 +81,18 @@ def main() -> None:
     }
 
     db = SessionLocal()
-    now = utc_now()
-    added_req = updated_req = added_actual = repaired_actual = 0
+    added_req = updated_req = added_actual = repaired_actual = reset_bootstrap = 0
     try:
         existing_req = {row.apartment: row for row in db.scalars(select(RequirementDB)).all()}
         existing_actual = {row.apartment: row for row in db.scalars(select(ActualDB)).all()}
+
+        # Repair rows produced by the previous bootstrap implementation.
+        # ``repository-bootstrap`` was never a physical inspection.
+        for actual in existing_actual.values():
+            if actual.checked_by == "repository-bootstrap":
+                actual.checked_at = None
+                actual.checked_by = None
+                reset_bootstrap += 1
 
         for row in requirements_snapshot:
             apartment = (row.get("apartment") or "").strip()
@@ -107,33 +120,28 @@ def main() -> None:
             values = actual_values(snapshot)
             actual = existing_actual.get(apartment)
             if actual is None:
-                # Preserve the distinction between "real zero" and "checked zero".
-                verified = any(values.values())
+                # Import reference values, but DO NOT mark the room checked.
                 db.add(ActualDB(
                     apartment=apartment,
                     **values,
-                    checked_at=now if verified else None,
-                    checked_by="repository-bootstrap" if verified else None,
+                    checked_at=None,
+                    checked_by=None,
                 ))
                 added_actual += 1
                 continue
 
-            # Only rows that have never been checked may be restored from the
-            # repository snapshot. A non-zero source snapshot is authoritative for
-            # an unchecked row, even when the database contains an older non-zero
-            # value. A zero source snapshot never erases an existing non-zero value.
-            if actual.checked_at is None:
-                current = {field: int(getattr(actual, field) or 0) for field in FIELDS}
-                if any(values.values()):
-                    if current != values:
-                        for field, value in values.items():
-                            setattr(actual, field, value)
-                        repaired_actual += 1
-                    actual.checked_at = now
-                    actual.checked_by = "repository-bootstrap"
-                elif all(v == 0 for v in current.values()):
-                    # Keep genuine zero snapshots explicitly unverified.
-                    pass
+            # A physically checked row is authoritative and must never be
+            # overwritten by the repository snapshot.
+            if actual.checked_at is not None:
+                continue
+
+            # For an unchecked row, keep the repository values visible in the
+            # application. They remain reference values until a physical check.
+            current = {field: int(getattr(actual, field) or 0) for field in FIELDS}
+            if current != values:
+                for field, value in values.items():
+                    setattr(actual, field, value)
+                repaired_actual += 1
 
         db.commit()
     except Exception:
@@ -147,7 +155,8 @@ def main() -> None:
         f"requirements_added={added_req}, "
         f"requirements_updated={updated_req}, "
         f"actuals_added={added_actual}, "
-        f"actuals_repaired={repaired_actual}"
+        f"actuals_repaired={repaired_actual}, "
+        f"old_bootstrap_checks_reset={reset_bootstrap}"
     )
 
 
