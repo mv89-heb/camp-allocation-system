@@ -7,20 +7,11 @@
 <style>html,body{margin:0;width:100%;height:100%;background:#f4f6fa;font-family:Segoe UI,Tahoma,Arial,sans-serif}iframe{display:block;width:100%;height:100%;border:0}</style>
 </head>
 <body>
-<iframe id="field" src="/static/inspection.html"></iframe>
+<iframe id="field" src="/static/field-report.html"></iframe>
 <script>
-// Current phase: field authentication is disabled. Automatically open the existing
-// mobile field form without requiring a token. The API accepts the request without auth.
-const frame=document.getElementById('field');
-frame.addEventListener('load',()=>{
-  try{
-    const w=frame.contentWindow;
-    const token=w.document.getElementById('token');
-    const login=w.document.querySelector('#login button');
-    if(token) token.value='field-open';
-    if(login) login.click();
-  }catch(e){console.error(e)}
-});
+// Current phase: authentication is intentionally omitted from the field workflow.
+// The Field API currently accepts the field request without validating the token.
+localStorage.setItem('camp_field_token','field-open-workflow');
 </script>
 </body>
 </html>
