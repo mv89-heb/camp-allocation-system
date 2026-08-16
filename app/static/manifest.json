@@ -1,0 +1,12 @@
+{
+  "name": "בדיקת חדרים | מערכת הקמפוס",
+  "short_name": "בדיקת חדרים",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "/static/inspection.html",
+  "scope": "/static/",
+  "display": "standalone",
+  "background_color": "#f4f6fa",
+  "theme_color": "#4f46e5",
+  "description": "טופס נייד לבדיקת מצאי ובקרת נזקים בחדרי הקמפוס"
+}
