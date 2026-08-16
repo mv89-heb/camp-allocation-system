@@ -1,13 +1,15 @@
-"""Restore the repository's preserved room/inventory snapshot into Neon safely.
+"""Safely reconcile the versioned room snapshot with the Neon database.
 
-This is intentionally idempotent:
-- never drops or replaces tables;
-- never overwrites an existing verified room;
-- creates missing requirement/actual rows from the versioned CSV snapshots;
-- repairs only legacy all-zero actual rows that have never been checked when the
-  preserved snapshot contains real physical counts.
+Rules:
+- Neon is the production database; never drop or replace tables.
+- requirements are reconciled to the repository's canonical inventory.csv snapshot.
+- actual inventory is restored from actual_inventory.csv only when a room has never
+  been physically checked in the database.
+- a real zero snapshot remains zero and *unchecked*; it is never converted into a
+  confirmed shortage.
+- an already checked actual inventory row is never overwritten by bootstrap.
 
-Run once after configuring DATABASE_URL, or safely on each Render start.
+The script is idempotent and safe to run on every Render start.
 """
 from __future__ import annotations
 
@@ -23,21 +25,39 @@ from app.main import ensure_schema
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 FIELDS = ("beds", "mattresses", "closets", "ac_units", "ac_remotes")
+STD_CAPS = {"beds": 4, "mattresses": 4, "closets": 4, "ac_units": 4, "ac_remotes": 1}
 
 
 def read_csv(name: str) -> list[dict[str, str]]:
     path = DATA / name
     if not path.exists():
-        return []
+        raise RuntimeError(f"Required repository snapshot is missing: {path}")
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
 
 
-def number(row: dict[str, str], key: str) -> int:
+def number_or_none(row: dict[str, str], key: str) -> int | None:
     raw = (row.get(key) or "").strip()
     if not raw:
-        return 0
+        return None
     return max(0, int(float(raw)))
+
+
+def number(row: dict[str, str], key: str) -> int:
+    value = number_or_none(row, key)
+    return 0 if value is None else value
+
+
+def requirement_values(row: dict[str, str]) -> dict[str, int]:
+    planned = {field: number(row, field) for field in FIELDS}
+    return {
+        **{f"{field}_plan": planned[field] for field in FIELDS},
+        **{f"{field}_std": min(planned[field], STD_CAPS[field]) for field in FIELDS},
+    }
+
+
+def actual_values(row: dict[str, str]) -> dict[str, int]:
+    return {field: number(row, field) for field in FIELDS}
 
 
 def main() -> None:
@@ -47,49 +67,47 @@ def main() -> None:
     ensure_schema()
     Base.metadata.create_all(bind=engine)
 
-    requirements = read_csv("inventory.csv")
+    requirements_snapshot = read_csv("inventory.csv")
     actual_snapshot = {
-        (r.get("apartment") or "").strip(): r
-        for r in read_csv("actual_inventory.csv")
-        if (r.get("apartment") or "").strip()
+        (row.get("apartment") or "").strip(): row
+        for row in read_csv("actual_inventory.csv")
+        if (row.get("apartment") or "").strip()
     }
 
     db = SessionLocal()
     now = utc_now()
-    added_req = added_actual = repaired_actual = 0
+    added_req = updated_req = added_actual = repaired_actual = 0
     try:
-        existing_req = {r.apartment: r for r in db.scalars(select(RequirementDB)).all()}
-        existing_actual = {r.apartment: r for r in db.scalars(select(ActualDB)).all()}
+        existing_req = {row.apartment: row for row in db.scalars(select(RequirementDB)).all()}
+        existing_actual = {row.apartment: row for row in db.scalars(select(ActualDB)).all()}
 
-        for row in requirements:
+        for row in requirements_snapshot:
             apartment = (row.get("apartment") or "").strip()
             if not apartment:
                 continue
 
-            planned = {field: number(row, field) for field in FIELDS}
-            if apartment not in existing_req:
-                db.add(RequirementDB(
-                    apartment=apartment,
-                    beds_plan=planned["beds"],
-                    mattresses_plan=planned["mattresses"],
-                    closets_plan=planned["closets"],
-                    ac_units_plan=planned["ac_units"],
-                    ac_remotes_plan=planned["ac_remotes"],
-                    beds_std=min(planned["beds"], 4),
-                    mattresses_std=min(planned["mattresses"], 4),
-                    closets_std=min(planned["closets"], 4),
-                    ac_units_std=min(planned["ac_units"], 4),
-                    ac_remotes_std=min(planned["ac_remotes"], 1),
-                ))
+            expected = requirement_values(row)
+            record = existing_req.get(apartment)
+            if record is None:
+                db.add(RequirementDB(apartment=apartment, **expected))
                 added_req += 1
+            else:
+                changed = False
+                for field, value in expected.items():
+                    if getattr(record, field) != value:
+                        setattr(record, field, value)
+                        changed = True
+                if changed:
+                    updated_req += 1
 
             snapshot = actual_snapshot.get(apartment)
-            if not snapshot:
+            if snapshot is None:
                 continue
 
-            values = {field: number(snapshot, field) for field in FIELDS}
+            values = actual_values(snapshot)
             actual = existing_actual.get(apartment)
             if actual is None:
+                # Preserve the distinction between "real zero" and "checked zero".
                 verified = any(values.values())
                 db.add(ActualDB(
                     apartment=apartment,
@@ -98,13 +116,18 @@ def main() -> None:
                     checked_by="repository-bootstrap" if verified else None,
                 ))
                 added_actual += 1
-            elif actual.checked_at is None:
+                continue
+
+            # Bootstrap may restore only rows that have never been checked.
+            # This protects any physical count entered by a real operator.
+            if actual.checked_at is None:
                 current = {field: int(getattr(actual, field) or 0) for field in FIELDS}
-                if all(v == 0 for v in current.values()) and any(values.values()):
+                if current != values and (all(v == 0 for v in current.values()) or not any(current.values())):
                     for field, value in values.items():
                         setattr(actual, field, value)
-                    actual.checked_at = now
-                    actual.checked_by = "repository-bootstrap"
+                    if any(values.values()):
+                        actual.checked_at = now
+                        actual.checked_by = "repository-bootstrap"
                     repaired_actual += 1
 
         db.commit()
@@ -117,6 +140,7 @@ def main() -> None:
     print(
         "Neon bootstrap complete: "
         f"requirements_added={added_req}, "
+        f"requirements_updated={updated_req}, "
         f"actuals_added={added_actual}, "
         f"actuals_repaired={repaired_actual}"
     )
