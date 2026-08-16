@@ -5,7 +5,20 @@ from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text, c
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/inventory.db")
+ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).strip().lower()
+IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or os.getenv("RENDER", "").strip().lower() == "true"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+# Never silently fall back to a local SQLite database in production/Render.
+# A silent fallback makes a deployment look healthy while all data is written locally
+# and disappears on the next instance replacement.
+if not DATABASE_URL:
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            "DATABASE_URL is required in production. Configure the Neon PostgreSQL connection string."
+        )
+    DATABASE_URL = "sqlite:///./data/inventory.db"
+
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -91,6 +104,10 @@ class DamageAuditDB(Base):
     action = Column(String(30), nullable=False)
     previous_values = Column(JSON, nullable=True)
     new_values = Column(JSON, nullable=False)
+
+
+def database_backend() -> str:
+    return "postgresql" if DATABASE_URL.startswith(("postgresql://", "postgresql+")) else "sqlite"
 
 
 def utc_now() -> datetime:
