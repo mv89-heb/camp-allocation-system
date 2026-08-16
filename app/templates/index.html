@@ -1,230 +1,53 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="he" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <title>מערכת בקרת מלאי דירות פנימייה</title>
-    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <style>
-        :root {
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --border: #e2e8f0;
-            --th-bg: #f1f5f9;
-            --danger-bg: #fef2f2; --danger-text: #b91c1c; --danger-border: #fca5a5;
-            --success-bg: #f0fdf4; --success-text: #166534; --success-border: #86efac;
-            --warning-bg: #fffbeb; --warning-text: #b45309; --warning-border: #fde68a;
-        }
-
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 30px 20px; }
-        .container { max-width: 1300px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 2px solid var(--border); padding-bottom: 15px; }
-        h1 { margin: 0; font-size: 26px; font-weight: 700; color: #0f172a; }
-        .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
-        .btn-refresh { background-color: #ffffff; color: var(--text-main); border: 1px solid var(--border); padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
-        .btn-refresh:hover { background-color: #f8fafc; border-color: #cbd5e1; }
-        
-        /* בורר מצבים חכם */
-        .mode-container { display: flex; gap: 10px; margin-bottom: 25px; }
-        .btn-mode { background-color: #ffffff; border: 1px solid var(--border); padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: var(--text-main); }
-        .btn-mode.active { background-color: var(--primary); color: white; border-color: var(--primary); }
-
-        .card { background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 25px; border: 1px solid var(--border); }
-        .card h3 { margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #334155; }
-        .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-        .form-group { display: flex; flex-direction: column; }
-        label { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #475569; }
-        input { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background-color: #f8fafc; transition: all 0.2s; }
-        input:focus { outline: none; border-color: var(--primary); background-color: #fff; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
-        .btn-submit { background-color: var(--primary); color: white; border: none; padding: 11px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; }
-        .btn-submit:hover { background-color: var(--primary-hover); }
-
-        .table-container { background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); overflow: hidden; border: 1px solid var(--border); }
-        table { width: 100%; border-collapse: collapse; text-align: center; }
-        th { background-color: var(--th-bg); color: #475569; font-weight: 600; font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--border); border-left: 1px solid #e2e8f0; }
-        th.main-header { font-size: 14px; background-color: #e2e8f0; color: #1e293b; border-bottom: 2px solid #cbd5e1; }
-        td { padding: 12px 8px; border-bottom: 1px solid var(--border); border-left: 1px solid #f1f5f9; font-size: 14px; }
-        tr:hover { background-color: #f8fafc; }
-        
-        .num-req { color: var(--text-muted); font-size: 13px; }
-        .num-act { font-weight: 600; color: #0f172a; }
-        .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
-        .bg-danger { background-color: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
-        .bg-success { background-color: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
-        .bg-warning { background-color: var(--warning-bg); color: var(--warning-text); border-color: var(--warning-border); }
-        .status-pill { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
-        .loading-text { padding: 40px; font-size: 16px; color: var(--text-muted); font-weight: 500; }
-    </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="same-origin">
+<title>מערכת הקצאת קמפוס ובקרת חדרים</title>
+<script src="https://cdn.jsdelivr.net/npm/axios@1.9.0/dist/axios.min.js"></script>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#667085;--line:#dfe4ea;--primary:#4f46e5;--danger:#b42318;--dangerbg:#fff1f0;--ok:#027a48;--okbg:#ecfdf3;--warn:#b54708;--warnbg:#fffaeb;--critical:#7a271a;--criticalbg:#fef3f2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,Tahoma,Arial,sans-serif}main{max-width:1550px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:20px}.title{font-size:28px;font-weight:800}.muted{color:var(--muted);font-size:14px;margin-top:5px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 2px 8px #0000000a}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:700;color:#475467}.field input,.field select,.field textarea{min-width:100px;padding:10px;border:1px solid #cfd6df;border-radius:8px;background:#fff;font-size:14px}.field textarea{min-width:300px;min-height:90px}.field input:focus,.field select:focus,.field textarea:focus{outline:3px solid #4f46e522;border-color:var(--primary)}button{border:0;border-radius:8px;padding:10px 15px;font-weight:700;cursor:pointer}.primary{background:var(--primary);color:#fff}.secondary{background:#fff;border:1px solid var(--line)}.danger{background:var(--dangerbg);color:var(--danger)}.hidden{display:none!important}.auth{max-width:430px;margin:10vh auto}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;min-width:1000px}th,td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:center;vertical-align:middle}th{background:#f1f4f8;font-size:12px;position:sticky;top:0}td{font-size:13px}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-weight:700;font-size:12px}.ok{background:var(--okbg);color:var(--ok)}.bad{background:var(--dangerbg);color:var(--danger)}.warn{background:var(--warnbg);color:var(--warn)}.critical{background:var(--criticalbg);color:var(--critical)}.error{color:var(--danger);font-weight:700}.success{color:var(--ok);font-weight:700}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.stat{font-size:13px;color:var(--muted)}.tabs{display:flex;gap:8px;margin-bottom:18px}.tab.active{background:var(--primary);color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.damage-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}.damage-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.modal{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;padding:20px;z-index:20}.modal-box{background:#fff;border-radius:14px;max-width:900px;width:100%;max-height:90vh;overflow:auto;padding:20px}.link{color:var(--primary);word-break:break-all}
+</style>
 </head>
-<body onload="analyze()">
-
-<div class="container">
-    <div class="header">
-        <div>
-            <h1>📊 דאשבורד בקרת מלאי דירות פנימייה</h1>
-            <div class="subtitle">ניהול חוסרים בזמן אמת מול תקן קבוע או תרחיש קיבולת מורחב</div>
-        </div>
-        <button class="btn-refresh" onclick="analyze()">🔄 רענן נתונים</button>
-    </div>
-
-    <div class="mode-container">
-        <button id="btn-std" class="btn-mode active" onclick="changeMode('std')">📌 תקן סטנדרטי קבוע (4 בחדר)</button>
-        <button id="btn-plan" class="btn-mode" onclick="changeMode('plan')">🚀 תקן מתוכנן מורחב (6 בחדר)</button>
-    </div>
-
-    <div class="card">
-        <h3>📝 עדכון ספירת מלאי פיזית בדירה</h3>
-        <div class="form-row">
-            <div class="form-group">
-                <label>מספר דירה / קרוון</label>
-                <input type="text" id="inpApt" placeholder="לדוגמה: חיפה 501" style="width: 160px;">
-            </div>
-            <div class="form-group">
-                <label>מיטות בפועל</label>
-                <input type="number" id="inpBeds" min="0" value="0" style="width: 80px;">
-            </div>
-            <div class="form-group">
-                <label>מזרנים בפועל</label>
-                <input type="number" id="inpMattresses" min="0" value="0" style="width: 80px;">
-            </div>
-            <div class="form-group">
-                <label>ארונות בפועל</label>
-                <input type="number" id="inpClosets" min="0" value="0" style="width: 80px;">
-            </div>
-            <div class="form-group">
-                <label>מזגנים בפועל</label>
-                <input type="number" id="inpAcUnits" min="0" value="0" style="width: 80px;">
-            </div>
-            <div class="form-group">
-                <label>שלטים בפועל</label>
-                <input type="number" id="inpAcRemotes" min="0" value="0" style="width: 80px;">
-            </div>
-            <div class="form-group">
-                <button class="btn-submit" onclick="saveInventory()">💾 שמור דיווח</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th rowspan="2" class="main-header" style="width: 150px; border-left: 2px solid #cbd5e1;">שם הדירה</th>
-                    <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #eff6ff;">🛏️ מיטות</th>
-                    <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #f0fdf4;">💤 מזרנים</th>
-                    <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #fdf2f8;">🚪 ארונות</th>
-                    <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #fff7ed;">❄️ מזגנים</th>
-                    <th colspan="3" class="main-header" style="border-left: 2px solid #cbd5e1; background-color: #f6f5ff;">🎮 שלטי מזגן</th>
-                    <th rowspan="2" class="main-header" style="width: 100px;">סטטוס חדר</th>
-                </tr>
-                <tr>
-                    <th>תקן</th><th>בפועל</th><th style="border-left: 2px solid #cbd5e1;">פער</th>
-                    <th>תקן</th><th>בפועל</th><th style="border-left: 2px solid #cbd5e1;">פער</th>
-                    <th>תקן</th><th>בפועל</th><th style="border-left: 2px solid #cbd5e1;">פער</th>
-                    <th>תקן</th><th>בפועל</th><th style="border-left: 2px solid #cbd5e1;">פער</th>
-                    <th>תקן</th><th>בפועל</th><th style="border-left: 2px solid #cbd5e1;">פער</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                <tr><td colspan="17" class="loading-text">טוען נתונים מהמערכת...</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
+<body>
+<div id="auth" class="auth card hidden"><div class="title">🔐 כניסה למערכת</div><p class="muted">המערכת מוגנת באמצעות ADMIN_TOKEN.</p><div class="field"><label>מפתח גישה</label><input id="token" type="password" autocomplete="current-password"></div><button class="primary" style="margin-top:12px" onclick="login()">כניסה</button><div id="authError" class="error" style="margin-top:10px"></div></div>
+<main id="app" class="hidden">
+<div class="header"><div><div class="title">🏕️ מערכת הקצאת קמפוס ובקרת חדרים</div><div class="muted">מלאי • הקצאה • בקרת נזקים • היסטוריית שינויים</div></div><div class="toolbar"><button class="secondary" onclick="loadInventory()">🔄 רענן</button><button class="danger" onclick="logout()">יציאה</button></div></div>
+<div class="tabs"><button id="tabInventory" class="tab active" onclick="switchTab('inventory')">📦 מלאי</button><button id="tabDamage" class="tab secondary" onclick="switchTab('damage')">🛠️ בקרת נזקים</button></div>
+<section id="inventoryTab">
+<section class="card"><div class="row"><div class="field"><label>מצב תקן</label><select id="mode" onchange="loadInventory()"><option value="std">תקן סטנדרטי</option><option value="plan">תקן מתוכנן</option></select></div><div class="stat" id="summary"></div></div></section>
+<section class="card"><h3>📝 דיווח מצאי פיזי</h3><div class="row"><div class="field"><label>דירה / קרוון</label><input id="apartment" maxlength="120"></div><div class="field"><label>מיטות</label><input id="beds" type="number" min="0" max="1000" value="0"></div><div class="field"><label>מזרנים</label><input id="mattresses" type="number" min="0" max="1000" value="0"></div><div class="field"><label>ארונות</label><input id="closets" type="number" min="0" max="1000" value="0"></div><div class="field"><label>מזגנים</label><input id="ac_units" type="number" min="0" max="1000" value="0"></div><div class="field"><label>שלטים</label><input id="ac_remotes" type="number" min="0" max="1000" value="0"></div><button class="primary" onclick="saveInventory()">💾 שמור</button></div><div id="saveMessage" class="muted" style="margin-top:10px"></div></section>
+<section class="card"><div class="table-wrap"><table><thead><tr><th>דירה</th><th>מיטות<br>תקן / בפועל / פער</th><th>מזרנים<br>תקן / בפועל / פער</th><th>ארונות<br>תקן / בפועל / פער</th><th>מזגנים<br>תקן / בפועל / פער</th><th>שלטים<br>תקן / בפועל / פער</th><th>סטטוס</th><th>היסטוריה</th></tr></thead><tbody id="tableBody"></tbody></table></div></section>
+</section>
+<section id="damageTab" class="hidden">
+<section class="card"><h3>🛠️ דיווח נזק חדש</h3><div class="grid"><div class="field"><label>דירה / קרוון</label><input id="dApartment" maxlength="120" placeholder="למשל: ירושלים 201"></div><div class="field"><label>קטגוריה</label><select id="dCategory"><option value="FURNITURE">ריהוט</option><option value="ELECTRICAL">חשמל</option><option value="PLUMBING">אינסטלציה</option><option value="STRUCTURE">מבנה</option><option value="CLEANLINESS">ניקיון</option><option value="HVAC">מיזוג</option><option value="OTHER">אחר</option></select></div><div class="field"><label>חומרה</label><select id="dSeverity"><option value="LOW">נמוכה</option><option value="MEDIUM" selected>בינונית</option><option value="HIGH">גבוהה</option><option value="CRITICAL">קריטית</option></select></div><div class="field"><label>עלות משוערת</label><input id="dEstimated" type="number" min="0" step="0.01"></div><div class="field"><label>אחראי / ספק</label><input id="dResponsible" maxlength="160"></div><div class="field" style="grid-column:1/-1"><label>תיאור הנזק</label><textarea id="dDescription" maxlength="5000"></textarea></div><div class="field" style="grid-column:1/-1"><label>קישורי תמונות / ראיות (מופרדים בשורה חדשה)</label><textarea id="dEvidence" placeholder="https://..."></textarea></div></div><button class="primary" style="margin-top:12px" onclick="createDamage()">➕ פתח דיווח נזק</button><div id="damageMessage" class="muted" style="margin-top:10px"></div></section>
+<section class="card"><div class="row"><div class="field"><label>חדר</label><input id="filterApartment" oninput="loadDamages()"></div><div class="field"><label>סטטוס</label><select id="filterStatus" onchange="loadDamages()"><option value="">הכל</option><option value="OPEN">פתוח</option><option value="INSPECTION">בבדיקה</option><option value="IN_PROGRESS">בטיפול</option><option value="RESOLVED">טופל</option><option value="CLOSED">סגור</option></select></div><div class="field"><label>חומרה</label><select id="filterSeverity" onchange="loadDamages()"><option value="">הכל</option><option value="LOW">נמוכה</option><option value="MEDIUM">בינונית</option><option value="HIGH">גבוהה</option><option value="CRITICAL">קריטית</option></select></div><div class="stat" id="damageSummary"></div></div></section>
+<section class="card"><div id="damageList" class="grid"></div></section>
+</section>
+</main>
+<div id="modal" class="modal hidden" onclick="if(event.target===this)closeModal()"><div class="modal-box"><div id="modalContent"></div><button class="secondary" onclick="closeModal()" style="margin-top:15px">סגור</button></div></div>
 <script>
-let currentMode = 'std';
-
-function changeMode(mode) {
-    currentMode = mode;
-    document.getElementById('btn-std').classList.toggle('active', mode === 'std');
-    document.getElementById('btn-plan').classList.toggle('active', mode === 'plan');
-    analyze();
-}
-
-async function saveInventory() {
-    const data = {
-        apartment: document.getElementById('inpApt').value,
-        beds: parseInt(document.getElementById('inpBeds').value) || 0,
-        mattresses: parseInt(document.getElementById('inpMattresses').value) || 0,
-        closets: parseInt(document.getElementById('inpClosets').value) || 0,
-        ac_units: parseInt(document.getElementById('inpAcUnits').value) || 0,
-        ac_remotes: parseInt(document.getElementById('inpAcRemotes').value) || 0
-    };
-
-    if (!data.apartment) return alert("חובה להזין מספר דירה או קרוון");
-
-    try {
-        await axios.post("/update_actual", data);
-        ['inpBeds', 'inpMattresses', 'inpClosets', 'inpAcUnits', 'inpAcRemotes'].forEach(id => document.getElementById(id).value = '0');
-        analyze();
-    } catch (e) {
-        alert("שגיאה בשמירת הנתונים.");
-    }
-}
-
-async function analyze() {
-    let tbody = document.getElementById("tableBody");
-    try {
-        let res = await axios.get(`/analyze?mode=${currentMode}`);
-        if (res.data.error) {
-            tbody.innerHTML = `<tr><td colspan="17" style="color:red; padding:30px;">${res.data.error}</td></tr>`;
-            return;
-        }
-        renderTable(res.data);
-    } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="17" style="color:red; padding:30px;">שגיאה בתקשורת עם השרת</td></tr>`;
-    }
-}
-
-function renderTable(data) {
-    let tbody = document.getElementById("tableBody");
-    tbody.innerHTML = "";
-
-    if (data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="17" class="loading-text">לא נמצאו נתונים להצגה.</td></tr>';
-        return;
-    }
-
-    data.forEach(row => {
-        let tr = document.createElement("tr");
-
-        const createItemColumns = (req, act, gap) => {
-            let gapBadge = "";
-            if (gap < 0) {
-                gapBadge = `<span class="badge bg-danger">${gap}</span>`;
-            } else if (gap > 0) {
-                gapBadge = `<span class="badge bg-warning">+${gap}</span>`;
-            } else {
-                gapBadge = `<span class="badge bg-success">0</span>`;
-            }
-
-            return `
-                <td class="num-req">${req}</td>
-                <td class="num-act">${act}</td>
-                <td style="border-left: 2px solid #e2e8f0;">${gapBadge}</td>
-            `;
-        };
-
-        let statusClass = "status-pill badge ";
-        let statusText = row.status ?? "תקין";
-        statusClass += statusText.includes("חסר") ? "bg-danger" : "bg-success";
-
-        tr.innerHTML = `
-            <td style="border-left: 2px solid #cbd5e1;"><strong>${row.apartment}</strong></td>
-            ${createItemColumns(row.beds_req, row.beds_act, row.gap_beds)}
-            ${createItemColumns(row.mattresses_req, row.mattresses_act, row.gap_mattresses)}
-            ${createItemColumns(row.closets_req, row.closets_act, row.gap_closets)}
-            ${createItemColumns(row.ac_units_req, row.ac_units_act, row.gap_ac_units)}
-            ${createItemColumns(row.ac_remotes_req, row.ac_remotes_act, row.gap_ac_remotes)}
-            <td><span class="${statusClass}">${statusText}</span></td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
+const authRequired={{ 'true' if auth_required else 'false' }};let token=sessionStorage.getItem('camp_admin_token')||'';
+const statusHe={OPEN:'פתוח',INSPECTION:'בבדיקה',IN_PROGRESS:'בטיפול',RESOLVED:'טופל',CLOSED:'סגור'};const severityHe={LOW:'נמוכה',MEDIUM:'בינונית',HIGH:'גבוהה',CRITICAL:'קריטית'};const categoryHe={FURNITURE:'ריהוט',ELECTRICAL:'חשמל',PLUMBING:'אינסטלציה',STRUCTURE:'מבנה',CLEANLINESS:'ניקיון',HVAC:'מיזוג',OTHER:'אחר'};
+function apiConfig(){return token?{headers:{'X-Admin-Token':token}}:{}}function show(id){document.getElementById(id).classList.remove('hidden')}function hide(id){document.getElementById(id).classList.add('hidden')}
+function login(){const v=document.getElementById('token').value.trim();if(!v){document.getElementById('authError').textContent='יש להזין מפתח';return}token=v;sessionStorage.setItem('camp_admin_token',token);loadInventory(true)}
+function logout(){sessionStorage.removeItem('camp_admin_token');token='';hide('app');show('auth')}
+function authError(e){if(e?.response?.status===401){logout();document.getElementById('authError').textContent='מפתח גישה אינו תקין';return true}return false}
+function switchTab(t){document.getElementById('inventoryTab').classList.toggle('hidden',t!=='inventory');document.getElementById('damageTab').classList.toggle('hidden',t!=='damage');document.getElementById('tabInventory').classList.toggle('active',t==='inventory');document.getElementById('tabDamage').classList.toggle('active',t==='damage');if(t==='damage')loadDamages()}
+function num(id){const n=Number(document.getElementById(id).value);return Number.isInteger(n)&&n>=0&&n<=1000?n:null}
+function cell(req,act,gap){const cls=gap<0?'bad':gap>0?'warn':'ok';return `<div>${req} / ${act} / <span class="badge ${cls}">${gap>0?'+':''}${gap}</span></div>`}
+async function loadInventory(fromLogin=false){try{const r=await axios.get('/analyze',{params:{mode:document.getElementById('mode').value},...apiConfig()});renderInventory(r.data);if(authRequired){hide('auth');show('app')}if(fromLogin)document.getElementById('authError').textContent=''}catch(e){if(!authError(e))document.getElementById('tableBody').innerHTML='<tr><td colspan="8" class="error">שגיאה בטעינת הנתונים</td></tr>'}}
+function renderInventory(rows){const b=document.getElementById('tableBody');b.innerHTML='';let m=0,x=0,o=0;rows.forEach(row=>{if(row.status==='חסר')m++;else if(row.status==='עודף')x++;else o++;const tr=document.createElement('tr');tr.innerHTML=`<td><strong>${escapeHtml(row.apartment)}</strong></td><td>${cell(row.beds_req,row.beds_act,row.gap_beds)}</td><td>${cell(row.mattresses_req,row.mattresses_act,row.gap_mattresses)}</td><td>${cell(row.closets_req,row.closets_act,row.gap_closets)}</td><td>${cell(row.ac_units_req,row.ac_units_act,row.gap_ac_units)}</td><td>${cell(row.ac_remotes_req,row.ac_remotes_act,row.gap_ac_remotes)}</td><td><span class="badge ${row.status==='חסר'?'bad':row.status==='עודף'?'warn':'ok'}">${row.status}</span></td><td><button class="secondary" onclick="showAudit(${JSON.stringify(row.apartment)})">היסטוריה</button></td>`;b.appendChild(tr)});document.getElementById('summary').textContent=`חדרים: ${rows.length} • חסרים: ${m} • עודפים: ${x} • תקינים: ${o}`}
+async function saveInventory(){const apartment=document.getElementById('apartment').value.trim();const values={beds:num('beds'),mattresses:num('mattresses'),closets:num('closets'),ac_units:num('ac_units'),ac_remotes:num('ac_remotes')};if(!apartment||Object.values(values).some(v=>v===null)){document.getElementById('saveMessage').textContent='יש למלא דירה וכל הכמויות';return}try{await axios.post('/update_actual',{apartment,...values},apiConfig());document.getElementById('saveMessage').textContent='נשמר בהצלחה';loadInventory()}catch(e){if(!authError(e))document.getElementById('saveMessage').textContent='השמירה נכשלה'}}
+async function showAudit(a){try{const r=await axios.get('/audit/'+encodeURIComponent(a),apiConfig());const text=r.data.length?r.data.map(x=>`<p><b>${new Date(x.changed_at).toLocaleString('he-IL')}</b> — ${escapeHtml(x.changed_by)}<br><small>${escapeHtml(JSON.stringify(x.previous_values))} → ${escapeHtml(JSON.stringify(x.new_values))}</small></p>`).join(''):'אין היסטוריה';openModal(`<h3>היסטוריה: ${escapeHtml(a)}</h3>${text}`)}catch(e){if(!authError(e))alert('לא ניתן לטעון היסטוריה')}}
+async function createDamage(){const apartment=document.getElementById('dApartment').value.trim(),description=document.getElementById('dDescription').value.trim(),estimated=document.getElementById('dEstimated').value;const evidence=document.getElementById('dEvidence').value.split('\n').map(x=>x.trim()).filter(Boolean);if(!apartment||description.length<5){document.getElementById('damageMessage').textContent='יש להזין חדר ותיאור נזק של לפחות 5 תווים';return}const payload={apartment,category:document.getElementById('dCategory').value,severity:document.getElementById('dSeverity').value,description,estimated_cost:estimated?Number(estimated):null,responsible_party:document.getElementById('dResponsible').value.trim()||null,evidence_urls:evidence};try{await axios.post('/damages',payload,apiConfig());document.getElementById('damageMessage').textContent='דיווח הנזק נפתח בהצלחה';['dApartment','dDescription','dEstimated','dResponsible','dEvidence'].forEach(id=>document.getElementById(id).value='');loadDamages()}catch(e){if(!authError(e))document.getElementById('damageMessage').textContent=e?.response?.data?.detail||'לא ניתן לפתוח דיווח'}}
+async function loadDamages(){try{const p={apartment:document.getElementById('filterApartment').value.trim()||undefined,status:document.getElementById('filterStatus').value||undefined,severity:document.getElementById('filterSeverity').value||undefined};const r=await axios.get('/damages',{params:p,...apiConfig()});renderDamages(r.data)}catch(e){if(!authError(e))document.getElementById('damageList').innerHTML='<div class="error">שגיאה בטעינת הנזקים</div>'}}
+function renderDamages(rows){document.getElementById('damageSummary').textContent=`דיווחים: ${rows.length} • פתוחים: ${rows.filter(x=>!['RESOLVED','CLOSED'].includes(x.status)).length}`;const list=document.getElementById('damageList');list.innerHTML='';if(!rows.length){list.innerHTML='<div class="muted">אין דיווחי נזק לפי הסינון.</div>';return}rows.forEach(d=>{const cls=d.severity==='CRITICAL'?'critical':d.severity==='HIGH'?'bad':d.severity==='MEDIUM'?'warn':'ok';const el=document.createElement('div');el.className='damage-card';el.innerHTML=`<div class="damage-head"><strong>🛠️ ${escapeHtml(d.apartment)}</strong><span class="badge ${cls}">${severityHe[d.severity]}</span></div><p><b>${categoryHe[d.category]}</b> • ${statusHe[d.status]}</p><p>${escapeHtml(d.description)}</p><p class="muted">עלות משוערת: ${d.estimated_cost==null?'—':d.estimated_cost.toLocaleString('he-IL',{minimumFractionDigits:2})} ₪${d.actual_cost==null?'':' • בפועל: '+d.actual_cost.toLocaleString('he-IL',{minimumFractionDigits:2})+' ₪'}</p><div class="toolbar"><button class="secondary" onclick="editDamage(${d.id})">עדכון</button><button class="secondary" onclick="showDamageAudit(${d.id})">היסטוריה</button></div>`;list.appendChild(el)})}
+async function editDamage(id){try{const r=await axios.get('/damages/'+id,apiConfig()),d=r.data;openModal(`<h3>עדכון נזק #${id} — ${escapeHtml(d.apartment)}</h3><div class="grid"><div class="field"><label>סטטוס</label><select id="mStatus">${['OPEN','INSPECTION','IN_PROGRESS','RESOLVED','CLOSED'].map(x=>`<option value="${x}" ${x===d.status?'selected':''}>${statusHe[x]}</option>`).join('')}</select></div><div class="field"><label>חומרה</label><select id="mSeverity">${['LOW','MEDIUM','HIGH','CRITICAL'].map(x=>`<option value="${x}" ${x===d.severity?'selected':''}>${severityHe[x]}</option>`).join('')}</select></div><div class="field"><label>עלות בפועל</label><input id="mCost" type="number" min="0" step="0.01" value="${d.actual_cost??''}"></div><div class="field"><label>אחראי / ספק</label><input id="mResponsible" value="${escapeAttr(d.responsible_party||'')}"></div><div class="field" style="grid-column:1/-1"><label>הערות טיפול</label><textarea id="mNotes">${escapeHtml(d.resolution_notes||'')}</textarea></div></div><button class="primary" style="margin-top:12px" onclick="saveDamage(${id})">💾 שמור עדכון</button>`)}catch(e){if(!authError(e))alert('שגיאה')}}
+async function saveDamage(id){const status=document.getElementById('mStatus').value;const notes=document.getElementById('mNotes').value.trim();if(['RESOLVED','CLOSED'].includes(status)&&notes.length<1){alert('יש להזין הערות טיפול לפני סגירה');return}const cost=document.getElementById('mCost').value;try{await axios.patch('/damages/'+id,{status,severity:document.getElementById('mSeverity').value,actual_cost:cost?Number(cost):null,responsible_party:document.getElementById('mResponsible').value.trim()||null,resolution_notes:notes||null},apiConfig());closeModal();loadDamages()}catch(e){if(!authError(e))alert(e?.response?.data?.detail||'לא ניתן לעדכן')}}
+async function showDamageAudit(id){try{const r=await axios.get('/damages/'+id+'/audit',apiConfig());openModal(`<h3>היסטוריית נזק #${id}</h3>${r.data.map(x=>`<p><b>${new Date(x.changed_at).toLocaleString('he-IL')}</b> — ${escapeHtml(x.action)} — ${escapeHtml(x.changed_by)}<br><small>${escapeHtml(JSON.stringify(x.previous_values))} → ${escapeHtml(JSON.stringify(x.new_values))}</small></p>`).join('')||'<p>אין היסטוריה</p>' )}catch(e){if(!authError(e))alert('שגיאה')}}
+function openModal(html){document.getElementById('modalContent').innerHTML=html;show('modal')}function closeModal(){hide('modal')}function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function escapeAttr(v){return escapeHtml(v)}
+if(authRequired){show('auth');if(token)loadInventory()}else{show('app');loadInventory()}
 </script>
 </body>
 </html>
