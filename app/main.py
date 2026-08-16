@@ -28,7 +28,6 @@ from app.database import (
     get_db,
     utc_now,
 )
-from app.damage_extended import router as damage_extended_router
 from app.logic import compute_gaps, dataframe_to_records
 from app.models import (
     DAMAGE_CATEGORIES,
@@ -51,13 +50,12 @@ STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Camp Allocation System", version="2.2.0")
+app = FastAPI(title="Camp Allocation System", version="2.1.1")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 allowed_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.include_router(damage_extended_router)
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 AUTH_REQUIRED = bool(ADMIN_TOKEN)
@@ -138,6 +136,23 @@ def ensure_schema() -> None:
                 conn.execute(text('ALTER TABLE actuals ADD COLUMN checked_by VARCHAR(120)'))
 
 
+def _assert_canonical_schema() -> None:
+    """Fail with a useful message if a deployment still points at an incompatible DB."""
+    required = {
+        "requirements": {
+            "apartment",
+            "beds_std", "mattresses_std", "closets_std", "ac_units_std", "ac_remotes_std",
+            "beds_plan", "mattresses_plan", "closets_plan", "ac_units_plan", "ac_remotes_plan",
+        },
+        "actuals": {"apartment", "beds", "mattresses", "closets", "ac_units", "ac_remotes"},
+    }
+    for table_name, expected in required.items():
+        columns = _legacy_columns(table_name)
+        missing = expected - columns
+        if missing:
+            raise RuntimeError(f"Database schema is not upgraded for {table_name}: missing {sorted(missing)}")
+
+
 @app.on_event("startup")
 def startup() -> None:
     ensure_schema()
@@ -152,12 +167,14 @@ def home(request: Request):
 @app.get("/health", response_model=HealthResponse)
 def health():
     try:
+        ensure_schema()
+        _assert_canonical_schema()
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return HealthResponse(status="ok", database="ok", timestamp=utc_now())
     except Exception:
         logger.exception("Health check failed")
-        raise HTTPException(status_code=503, detail="Database unavailable")
+        raise HTTPException(status_code=503, detail="Database unavailable or schema upgrade required")
 
 
 @app.get("/analyze")
@@ -165,6 +182,10 @@ def analyze(mode: str = "std", _: None = Depends(require_auth)):
     if mode not in {"std", "plan"}:
         raise HTTPException(status_code=400, detail="mode must be std or plan")
     try:
+        # Do this at request time as well as startup so an already-running deployment
+        # upgrades a legacy DB before SQLAlchemy builds a SELECT against new columns.
+        ensure_schema()
+        _assert_canonical_schema()
         with engine.connect() as conn:
             req_df = pd.read_sql(select(RequirementDB), conn)
             act_df = pd.read_sql(select(ActualDB), conn)
@@ -175,6 +196,9 @@ def analyze(mode: str = "std", _: None = Depends(require_auth)):
         raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.exception("Analyze schema validation failed")
+        raise HTTPException(status_code=503, detail="Database schema upgrade required") from exc
     except Exception:
         logger.exception("Analyze failed")
         raise HTTPException(status_code=500, detail="Unable to analyze inventory")
