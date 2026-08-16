@@ -3,9 +3,5 @@ services:
     name: camp-allocation-system
     runtime: python
     buildCommand: pip install -r requirements.txt
-    # sitecustomize.py performs the Neon reconciliation automatically when the
-    # production process is Uvicorn. Keeping the Start Command plain also makes
-    # the deployment safe when Render uses this Blueprint instead of a manually
-    # configured command.
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.entrypoint:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
