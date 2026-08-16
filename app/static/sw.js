@@ -1,5 +1,5 @@
-const CACHE='camp-field-v4';
-const SHELL=['/static/field.html','/static/field-report.html','/static/manifest.json'];
+const CACHE='camp-field-v5';
+const SHELL=['/static/field.html','/static/field-report.html','/static/field-open.html','/static/manifest.json'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('camp-field-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
