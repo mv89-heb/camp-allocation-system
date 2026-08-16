@@ -2,45 +2,68 @@ from __future__ import annotations
 
 import hashlib
 import os
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import ActualDB, RequirementDB, DamageReportDB, get_db, utc_now
-from app.models import ActualInventoryUpdate, DamageCreateRequest
+from app.database import ActualDB, DamageAuditDB, DamageReportDB, InventoryAuditDB, RequirementDB, get_db, utc_now
+from app.models import ActualInventoryUpdate, DamageCreateRequest, FieldRoomReportRequest
 
 router = APIRouter(prefix="/field-api", tags=["field"])
 FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 
+
 def _authorized(token: str | None) -> bool:
     if not FIELD_TOKEN and not ADMIN_TOKEN:
-        # Development fallback only. Production should set FIELD_TOKEN.
         return True
     if not token:
         return False
     candidate = hashlib.sha256(token.encode()).digest()
-    valid = []
-    if FIELD_TOKEN:
-        valid.append(hashlib.sha256(FIELD_TOKEN.encode()).digest())
-    if ADMIN_TOKEN:
-        valid.append(hashlib.sha256(ADMIN_TOKEN.encode()).digest())
-    return any(candidate == expected for expected in valid)
+    return any(candidate == hashlib.sha256(value.encode()).digest() for value in (FIELD_TOKEN, ADMIN_TOKEN) if value)
 
-def require_field_token(x_field_token: str | None = Header(default=None, alias="X-Field-Token"), x_admin_token: str | None = Header(default=None, alias="X-Admin-Token")) -> None:
-    if _authorized(x_field_token) or _authorized(x_admin_token):
-        return
+
+def require_field_token(
+    x_field_token: str | None = Header(default=None, alias="X-Field-Token"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> str:
+    if x_field_token and _authorized(x_field_token):
+        return "field-reporter"
+    if x_admin_token and _authorized(x_admin_token):
+        return "admin"
     raise HTTPException(status_code=401, detail="Field authentication required")
 
-@router.get("/rooms")
-def field_rooms(db: Session = Depends(get_db), _: None = Depends(require_field_token)):
+
+def _room_exists(db: Session, apartment: str) -> bool:
+    return (
+        db.scalar(select(RequirementDB.apartment).where(RequirementDB.apartment == apartment)) is not None
+        or db.scalar(select(ActualDB.apartment).where(ActualDB.apartment == apartment)) is not None
+    )
+
+
+def _room_rows(db: Session):
     requirements = {r.apartment: r for r in db.scalars(select(RequirementDB)).all()}
     actuals = {r.apartment: r for r in db.scalars(select(ActualDB)).all()}
     names = sorted(set(requirements) | set(actuals))
+    return requirements, actuals, names
+
+
+@router.get("/rooms")
+def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_token)):
+    requirements, actuals, names = _room_rows(db)
     out = []
     for name in names:
         req = requirements.get(name)
         act = actuals.get(name)
+        open_damage = db.scalar(
+            select(DamageReportDB.id)
+            .where(
+                DamageReportDB.apartment == name,
+                DamageReportDB.status.in_(["OPEN", "INSPECTION", "IN_PROGRESS"]),
+            )
+            .limit(1)
+        )
         out.append({
             "apartment": name,
             "beds_req": getattr(req, "beds_std", 0) if req else 0,
@@ -55,47 +78,122 @@ def field_rooms(db: Session = Depends(get_db), _: None = Depends(require_field_t
             "ac_remotes_act": getattr(act, "ac_remotes", 0) if act else 0,
             "inventory_checked": bool(act and act.checked_at),
             "checked_at": act.checked_at.isoformat() if act and act.checked_at else None,
-            "open_damage": bool(db.scalar(select(DamageReportDB.id).where(DamageReportDB.apartment == name, DamageReportDB.status.in_(["OPEN", "INSPECTION", "IN_PROGRESS"])).limit(1))),
+            "open_damage": bool(open_damage),
         })
     return out
 
+
+@router.post("/room-report")
+def field_room_report(
+    data: FieldRoomReportRequest,
+    db: Session = Depends(get_db),
+    actor: str = Depends(require_field_token),
+):
+    apartment = data.inventory.apartment
+    if not _room_exists(db, apartment):
+        raise HTTPException(status_code=404, detail="Room/apartment does not exist")
+
+    now = utc_now()
+    values = {f: getattr(data.inventory, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes")}
+    record = db.scalar(select(ActualDB).where(ActualDB.apartment == apartment).with_for_update())
+    previous = None
+    try:
+        if record is None:
+            record = ActualDB(apartment=apartment, **values)
+            db.add(record)
+        else:
+            previous = {f: getattr(record, f) for f in values}
+            for field, value in values.items():
+                setattr(record, field, value)
+        record.checked_at = now
+        record.checked_by = actor
+        db.flush()
+        db.add(InventoryAuditDB(
+            apartment=apartment,
+            changed_at=now,
+            changed_by=actor,
+            previous_values=previous,
+            new_values=values,
+        ))
+
+        created = []
+        for damage in data.damages:
+            row = DamageReportDB(
+                apartment=apartment,
+                category=damage.category,
+                severity=damage.severity,
+                status="OPEN",
+                description=damage.description,
+                estimated_cost=damage.estimated_cost,
+                responsible_party=damage.responsible_party,
+                resolution_notes=damage.resolution_notes,
+                evidence_urls=damage.evidence_urls,
+                reported_by=actor,
+                reported_at=now,
+                updated_by=actor,
+                updated_at=now,
+            )
+            db.add(row)
+            db.flush()
+            db.add(DamageAuditDB(
+                damage_id=row.id,
+                apartment=apartment,
+                changed_at=now,
+                changed_by=actor,
+                action="CREATED",
+                previous_values=None,
+                new_values={"id": row.id, "apartment": apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description},
+            ))
+            created.append(row.id)
+
+        db.commit()
+        return {"status": "success", "apartment": apartment, "checked_at": now, "damage_ids": created}
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.post("/inventory")
-def field_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), _: None = Depends(require_field_token)):
-    record = db.scalar(select(ActualDB).where(ActualDB.apartment == data.apartment).with_for_update())
+def field_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), actor: str = Depends(require_field_token)):
+    if not _room_exists(db, data.apartment):
+        raise HTTPException(status_code=404, detail="Room/apartment does not exist")
     values = {f: getattr(data, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes")}
+    record = db.scalar(select(ActualDB).where(ActualDB.apartment == data.apartment).with_for_update())
+    previous = None
+    now = utc_now()
     if record is None:
         record = ActualDB(apartment=data.apartment, **values)
         db.add(record)
     else:
+        previous = {f: getattr(record, f) for f in values}
         for f, v in values.items():
             setattr(record, f, v)
-    record.checked_at = utc_now()
-    record.checked_by = "field-reporter"
+    record.checked_at = now
+    record.checked_by = actor
+    db.add(InventoryAuditDB(apartment=data.apartment, changed_at=now, changed_by=actor, previous_values=previous, new_values=values))
     db.commit()
     return {"status": "success", "apartment": data.apartment, "checked_at": record.checked_at}
 
+
 @router.post("/damages", status_code=201)
-def field_damage(data: DamageCreateRequest, db: Session = Depends(get_db), _: None = Depends(require_field_token)):
-    exists = db.scalar(select(RequirementDB.apartment).where(RequirementDB.apartment == data.apartment)) or db.scalar(select(ActualDB.apartment).where(ActualDB.apartment == data.apartment))
-    if not exists:
+def field_damage(data: DamageCreateRequest, db: Session = Depends(get_db), actor: str = Depends(require_field_token)):
+    if not _room_exists(db, data.apartment):
         raise HTTPException(status_code=404, detail="Room/apartment does not exist")
     now = utc_now()
     row = DamageReportDB(
-        apartment=data.apartment,
-        category=data.category,
-        severity=data.severity,
-        status="OPEN",
-        description=data.description,
-        estimated_cost=data.estimated_cost,
-        responsible_party=data.responsible_party,
-        resolution_notes=data.resolution_notes,
-        evidence_urls=data.evidence_urls,
-        reported_by="field-reporter",
-        reported_at=now,
-        updated_by="field-reporter",
-        updated_at=now,
+        apartment=data.apartment, category=data.category, severity=data.severity, status="OPEN",
+        description=data.description, estimated_cost=data.estimated_cost,
+        responsible_party=data.responsible_party, resolution_notes=data.resolution_notes,
+        evidence_urls=data.evidence_urls, reported_by=actor, reported_at=now,
+        updated_by=actor, updated_at=now,
     )
     db.add(row)
+    db.flush()
+    db.add(DamageAuditDB(
+        damage_id=row.id, apartment=row.apartment, changed_at=now, changed_by=actor,
+        action="CREATED", previous_values=None,
+        new_values={"id": row.id, "apartment": row.apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description},
+    ))
     db.commit()
     db.refresh(row)
     return {"id": row.id, "status": row.status, "apartment": row.apartment}
