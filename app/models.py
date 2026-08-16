@@ -5,12 +5,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 NonNegativeInt = Annotated[int, Field(ge=0, le=1000)]
+APARTMENT_PATTERN = r"^[0-9A-Za-z\u0590-\u05FF ._/#-]+$"
 
 
 class ActualInventoryUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    apartment: str = Field(min_length=1, max_length=120)
+    apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
     beds: NonNegativeInt = 0
     mattresses: NonNegativeInt = 0
     closets: NonNegativeInt = 0
