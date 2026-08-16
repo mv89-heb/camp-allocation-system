@@ -1,12 +1,12 @@
 {
-  "name": "בדיקת חדרים | מערכת הקמפוס",
-  "short_name": "בדיקת חדרים",
+  "name": "דיווח שטח | מערכת הקמפוס",
+  "short_name": "דיווח שטח",
   "lang": "he",
   "dir": "rtl",
-  "start_url": "/static/inspection.html",
+  "start_url": "/static/field.html",
   "scope": "/static/",
   "display": "standalone",
   "background_color": "#f4f6fa",
   "theme_color": "#4f46e5",
-  "description": "טופס נייד לבדיקת מצאי ובקרת נזקים בחדרי הקמפוס"
+  "description": "טופס נייד לבחירת חדר, בדיקת מצאי ובקרת נזקים"
 }
