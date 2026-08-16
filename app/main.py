@@ -24,6 +24,7 @@ from app.database import (
     DamageReportDB,
     InventoryAuditDB,
     RequirementDB,
+    database_backend,
     engine,
     get_db,
     utc_now,
@@ -50,7 +51,7 @@ STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Camp Allocation System", version="2.1.1")
+app = FastAPI(title="Camp Allocation System", version="2.1.2")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 allowed_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
@@ -156,7 +157,7 @@ def _assert_canonical_schema() -> None:
 @app.on_event("startup")
 def startup() -> None:
     ensure_schema()
-    logger.info("Camp Allocation System started; auth_required=%s", AUTH_REQUIRED)
+    logger.info("Camp Allocation System started; database_backend=%s auth_required=%s", database_backend(), AUTH_REQUIRED)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -182,8 +183,6 @@ def analyze(mode: str = "std", _: None = Depends(require_auth)):
     if mode not in {"std", "plan"}:
         raise HTTPException(status_code=400, detail="mode must be std or plan")
     try:
-        # Do this at request time as well as startup so an already-running deployment
-        # upgrades a legacy DB before SQLAlchemy builds a SELECT against new columns.
         ensure_schema()
         _assert_canonical_schema()
         with engine.connect() as conn:
@@ -404,23 +403,24 @@ def update_damage(
         raise HTTPException(status_code=404, detail="Damage report not found")
     actor = _actor(x_admin_token)
     previous = _damage_snapshot(row)
-    changes = data.model_dump(exclude_unset=True)
-    new_status = changes.get("status")
-    if new_status and new_status not in STATUS_TRANSITIONS[row.status]:
-        raise HTTPException(status_code=409, detail=f"Invalid status transition: {row.status} -> {new_status}")
-    for field, value in changes.items():
+    updates = data.model_dump(exclude_unset=True)
+    if "status" in updates:
+        new_status = updates["status"]
+        allowed = STATUS_TRANSITIONS.get(row.status, set())
+        if new_status != row.status and new_status not in allowed:
+            raise HTTPException(status_code=409, detail=f"Invalid status transition: {row.status} -> {new_status}")
+        if new_status in {"RESOLVED", "CLOSED"} and not (updates.get("resolution_notes") or row.resolution_notes):
+            raise HTTPException(status_code=422, detail="Resolution notes are required before resolving or closing")
+    for field, value in updates.items():
         setattr(row, field, value)
-    now = utc_now()
-    row.updated_at = now
     row.updated_by = actor
+    row.updated_at = utc_now()
     if row.status in {"RESOLVED", "CLOSED"} and row.resolved_at is None:
-        row.resolved_at = now
-    if row.status not in {"RESOLVED", "CLOSED"}:
-        row.resolved_at = None
+        row.resolved_at = row.updated_at
     db.add(DamageAuditDB(
         damage_id=row.id,
         apartment=row.apartment,
-        changed_at=now,
+        changed_at=row.updated_at,
         changed_by=actor,
         action="UPDATED",
         previous_values=previous,
@@ -435,12 +435,7 @@ def update_damage(
 def damage_audit(damage_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
     if db.get(DamageReportDB, damage_id) is None:
         raise HTTPException(status_code=404, detail="Damage report not found")
-    rows = db.scalars(
-        select(DamageAuditDB)
-        .where(DamageAuditDB.damage_id == damage_id)
-        .order_by(DamageAuditDB.changed_at.desc())
-        .limit(100)
-    ).all()
+    rows = db.scalars(select(DamageAuditDB).where(DamageAuditDB.damage_id == damage_id).order_by(DamageAuditDB.changed_at.desc()).limit(500)).all()
     return [
         {
             "id": row.id,
