@@ -142,12 +142,6 @@ class DamageUpdateRequest(BaseModel):
                 raise ValueError("evidence URLs must use http or https")
         return values
 
-    @model_validator(mode="after")
-    def validate_resolution(self):
-        if self.status in {"RESOLVED", "CLOSED"} and not self.resolution_notes:
-            raise ValueError("resolution_notes is required when closing/resolving a damage report")
-        return self
-
 
 class HealthResponse(BaseModel):
     status: str
