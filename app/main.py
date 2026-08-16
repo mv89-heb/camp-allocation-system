@@ -154,10 +154,30 @@ def _assert_canonical_schema() -> None:
             raise RuntimeError(f"Database schema is not upgraded for {table_name}: missing {sorted(missing)}")
 
 
+def _bootstrap_production_data() -> None:
+    """Reconcile repository snapshots into Neon exactly once per process startup."""
+    if not os.getenv("DATABASE_URL", "").strip():
+        return
+    if os.getenv("DISABLE_PRODUCTION_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes"}:
+        logger.warning("Production Neon bootstrap disabled by DISABLE_PRODUCTION_BOOTSTRAP")
+        return
+
+    from bootstrap_neon import main as bootstrap_main
+
+    logger.info("Starting production Neon bootstrap from repository snapshots")
+    bootstrap_main()
+
+
 @app.on_event("startup")
 def startup() -> None:
-    ensure_schema()
-    logger.info("Camp Allocation System started; database_backend=%s auth_required=%s", database_backend(), AUTH_REQUIRED)
+    try:
+        _bootstrap_production_data()
+        ensure_schema()
+        _assert_canonical_schema()
+        logger.info("Camp Allocation System started; database_backend=%s auth_required=%s", database_backend(), AUTH_REQUIRED)
+    except Exception:
+        logger.exception("Production startup failed")
+        raise
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -218,93 +238,50 @@ def update_actual_inventory(
         record = db.scalar(select(ActualDB).where(ActualDB.apartment == apartment_name).with_for_update())
         previous = None
         if record is None:
-            record = ActualDB(apartment=apartment_name, **values)
+            record = ActualDB(apartment=apartment_name, **values, checked_at=utc_now(), checked_by=actor)
             db.add(record)
         else:
             previous = {field: getattr(record, field) for field in values}
             for field, value in values.items():
                 setattr(record, field, value)
-        record.checked_at = utc_now()
-        record.checked_by = actor
-        db.flush()
-        db.add(InventoryAuditDB(apartment=apartment_name, changed_at=utc_now(), changed_by=actor, previous_values=previous, new_values=values))
+            record.checked_at = utc_now()
+            record.checked_by = actor
+        db.add(InventoryAuditDB(apartment=apartment_name, changed_at=utc_now(), changed_by=actor, old_values=previous, new_values=values))
         db.commit()
-        return {"status": "success", "apartment": apartment_name, "checked_at": record.checked_at}
+        return {"status": "ok", "apartment": apartment_name, "values": values}
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Concurrent update detected; please retry") from exc
+        raise HTTPException(status_code=409, detail="Inventory update conflicted with another change") from exc
     except Exception as exc:
         db.rollback()
-        logger.exception("Inventory update failed for apartment=%s", apartment_name)
-        raise HTTPException(status_code=500, detail="Unable to save inventory") from exc
+        logger.exception("Actual inventory update failed")
+        raise HTTPException(status_code=500, detail="Unable to update actual inventory") from exc
 
 
 @app.get("/audit/{apartment}")
-def audit(apartment: str, db: Session = Depends(get_db), _: None = Depends(require_auth)):
-    apartment = apartment.strip()
-    if not apartment:
-        raise HTTPException(status_code=400, detail="Apartment is required")
-    rows = db.scalars(
-        select(InventoryAuditDB)
-        .where(InventoryAuditDB.apartment == apartment)
-        .order_by(InventoryAuditDB.changed_at.desc())
-        .limit(100)
-    ).all()
-    return [
-        {
-            "id": row.id,
-            "apartment": row.apartment,
-            "changed_at": row.changed_at.astimezone(timezone.utc).isoformat(),
-            "changed_by": row.changed_by,
-            "previous_values": row.previous_values,
-            "new_values": row.new_values,
-        }
-        for row in rows
-    ]
+def audit(apartment: str, _: None = Depends(require_auth)):
+    with Session(bind=engine) as db:
+        rows = db.scalars(select(InventoryAuditDB).where(InventoryAuditDB.apartment == apartment).order_by(InventoryAuditDB.changed_at.desc())).all()
+        return [
+            {
+                "changed_at": row.changed_at.isoformat() if row.changed_at else None,
+                "changed_by": row.changed_by,
+                "old_values": row.old_values,
+                "new_values": row.new_values,
+            }
+            for row in rows
+        ]
 
 
-@app.post("/allocate")
-def allocate(request: AllocationRequest, db: Session = Depends(get_db), _: None = Depends(require_auth)):
-    rows = db.execute(select(ActualDB.apartment, ActualDB.beds)).all()
-    rooms = pd.DataFrame([{"room": apartment, "actual_capacity": beds} for apartment, beds in rows])
-    assignments = assign_groups(rooms, [group.model_dump() for group in request.groups], allow_split=request.allow_split) if not rooms.empty else []
-    return {"assignments": assignments}
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
 
 
-DAMAGE_OUTPUT_FIELDS = (
-    "id", "apartment", "category", "severity", "status", "description", "estimated_cost",
-    "actual_cost", "responsible_party", "resolution_notes", "evidence_urls", "reported_by",
-    "reported_at", "updated_by", "updated_at", "resolved_at",
-)
-
-
-def _damage_dict(row: DamageReportDB) -> dict:
-    return {
-        "id": row.id,
-        "apartment": row.apartment,
-        "category": row.category,
-        "severity": row.severity,
-        "status": row.status,
-        "description": row.description,
-        "estimated_cost": float(row.estimated_cost) if row.estimated_cost is not None else None,
-        "actual_cost": float(row.actual_cost) if row.actual_cost is not None else None,
-        "responsible_party": row.responsible_party,
-        "resolution_notes": row.resolution_notes,
-        "evidence_urls": row.evidence_urls or [],
-        "reported_by": row.reported_by,
-        "reported_at": row.reported_at.astimezone(timezone.utc).isoformat(),
-        "updated_by": row.updated_by,
-        "updated_at": row.updated_at.astimezone(timezone.utc).isoformat(),
-        "resolved_at": row.resolved_at.astimezone(timezone.utc).isoformat() if row.resolved_at else None,
-    }
-
-
-def _room_exists(db: Session, apartment: str) -> bool:
-    return db.scalar(select(RequirementDB.apartment).where(RequirementDB.apartment == apartment)) is not None or db.scalar(select(ActualDB.apartment).where(ActualDB.apartment == apartment)) is not None
-
-
-def _damage_snapshot(row: DamageReportDB) -> dict:
-    return _damage_dict(row)
+@app.get("/favicon.ico")
+def favicon():
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/damages")
@@ -312,33 +289,36 @@ def list_damages(
     apartment: str | None = None,
     status: str | None = None,
     severity: str | None = None,
-    category: str | None = None,
-    db: Session = Depends(get_db),
     _: None = Depends(require_auth),
 ):
-    query = select(DamageReportDB)
-    if apartment:
-        query = query.where(DamageReportDB.apartment == apartment.strip())
-    if status:
-        status = status.upper()
-        if status not in DAMAGE_STATUSES:
-            raise HTTPException(status_code=400, detail="Invalid damage status")
-        query = query.where(DamageReportDB.status == status)
-    if severity:
-        severity = severity.upper()
-        if severity not in DAMAGE_SEVERITIES:
-            raise HTTPException(status_code=400, detail="Invalid damage severity")
-        query = query.where(DamageReportDB.severity == severity)
-    if category:
-        category = category.upper()
-        if category not in DAMAGE_CATEGORIES:
-            raise HTTPException(status_code=400, detail="Invalid damage category")
-        query = query.where(DamageReportDB.category == category)
-    rows = db.scalars(query.order_by(DamageReportDB.updated_at.desc()).limit(1000)).all()
-    return [_damage_dict(row) for row in rows]
+    with Session(bind=engine) as db:
+        query = select(DamageReportDB).order_by(DamageReportDB.created_at.desc())
+        if apartment:
+            query = query.where(DamageReportDB.apartment.ilike(f"%{apartment}%"))
+        if status:
+            query = query.where(DamageReportDB.status == status)
+        if severity:
+            query = query.where(DamageReportDB.severity == severity)
+        rows = db.scalars(query.limit(MAX_ROWS)).all()
+        return [
+            {
+                "id": row.id,
+                "apartment": row.apartment,
+                "category": row.category,
+                "severity": row.severity,
+                "status": row.status,
+                "description": row.description,
+                "estimated_cost": row.estimated_cost,
+                "responsible_party": row.responsible_party,
+                "evidence_urls": row.evidence_urls or [],
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+            for row in rows
+        ]
 
 
-@app.post("/damages", status_code=201)
+@app.post("/damages")
 def create_damage(
     data: DamageCreateRequest,
     db: Session = Depends(get_db),
@@ -346,47 +326,31 @@ def create_damage(
 ):
     if not _safe_token_equal(x_admin_token):
         raise HTTPException(status_code=401, detail="Authentication required")
-    if not _room_exists(db, data.apartment):
-        raise HTTPException(status_code=404, detail="Room/apartment does not exist")
-    actor = _actor(x_admin_token)
-    now = utc_now()
-    row = DamageReportDB(
-        apartment=data.apartment,
-        category=data.category,
-        severity=data.severity,
-        status="OPEN",
-        description=data.description,
-        estimated_cost=data.estimated_cost,
-        responsible_party=data.responsible_party,
-        resolution_notes=data.resolution_notes,
-        evidence_urls=data.evidence_urls,
-        reported_by=actor,
-        reported_at=now,
-        updated_by=actor,
-        updated_at=now,
-    )
-    db.add(row)
-    db.flush()
-    db.add(DamageAuditDB(
-        damage_id=row.id,
-        apartment=row.apartment,
-        changed_at=now,
-        changed_by=actor,
-        action="CREATED",
-        previous_values=None,
-        new_values=_damage_snapshot(row),
-    ))
-    db.commit()
-    db.refresh(row)
-    return _damage_dict(row)
-
-
-@app.get("/damages/{damage_id}")
-def get_damage(damage_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
-    row = db.get(DamageReportDB, damage_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Damage report not found")
-    return _damage_dict(row)
+    try:
+        now = utc_now()
+        row = DamageReportDB(
+            apartment=data.apartment,
+            category=data.category,
+            severity=data.severity,
+            status="OPEN",
+            description=data.description,
+            estimated_cost=data.estimated_cost,
+            responsible_party=data.responsible_party,
+            evidence_urls=data.evidence_urls or [],
+            created_at=now,
+            updated_at=now,
+            created_by=_actor(x_admin_token),
+            updated_by=_actor(x_admin_token),
+        )
+        db.add(row)
+        db.flush()
+        db.add(DamageAuditDB(damage_id=row.id, changed_at=now, changed_by=_actor(x_admin_token), action="CREATE", old_values=None, new_values={"status": "OPEN", "severity": data.severity}))
+        db.commit()
+        return {"status": "ok", "id": row.id}
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Damage creation failed")
+        raise HTTPException(status_code=500, detail="Unable to create damage report") from exc
 
 
 @app.patch("/damages/{damage_id}")
@@ -402,50 +366,36 @@ def update_damage(
     if row is None:
         raise HTTPException(status_code=404, detail="Damage report not found")
     actor = _actor(x_admin_token)
-    previous = _damage_snapshot(row)
-    updates = data.model_dump(exclude_unset=True)
-    if "status" in updates:
-        new_status = updates["status"]
+    old_values = {"status": row.status, "severity": row.severity, "responsible_party": row.responsible_party}
+    if data.status is not None:
+        if data.status not in DAMAGE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
         allowed = STATUS_TRANSITIONS.get(row.status, set())
-        if new_status != row.status and new_status not in allowed:
-            raise HTTPException(status_code=409, detail=f"Invalid status transition: {row.status} -> {new_status}")
-        if new_status in {"RESOLVED", "CLOSED"} and not (updates.get("resolution_notes") or row.resolution_notes):
-            raise HTTPException(status_code=422, detail="Resolution notes are required before resolving or closing")
-    for field, value in updates.items():
-        setattr(row, field, value)
-    row.updated_by = actor
+        if data.status != row.status and data.status not in allowed:
+            raise HTTPException(status_code=409, detail=f"Invalid status transition: {row.status} -> {data.status}")
+        row.status = data.status
+    if data.severity is not None:
+        if data.severity not in DAMAGE_SEVERITIES:
+            raise HTTPException(status_code=400, detail="Invalid severity")
+        row.severity = data.severity
+    if data.responsible_party is not None:
+        row.responsible_party = data.responsible_party
+    if data.description is not None:
+        row.description = data.description
+    if data.estimated_cost is not None:
+        row.estimated_cost = data.estimated_cost
+    if data.evidence_urls is not None:
+        row.evidence_urls = data.evidence_urls
     row.updated_at = utc_now()
-    if row.status in {"RESOLVED", "CLOSED"} and row.resolved_at is None:
-        row.resolved_at = row.updated_at
-    db.add(DamageAuditDB(
-        damage_id=row.id,
-        apartment=row.apartment,
-        changed_at=row.updated_at,
-        changed_by=actor,
-        action="UPDATED",
-        previous_values=previous,
-        new_values=_damage_snapshot(row),
-    ))
+    row.updated_by = actor
+    db.add(DamageAuditDB(damage_id=row.id, changed_at=row.updated_at, changed_by=actor, action="UPDATE", old_values=old_values, new_values={"status": row.status, "severity": row.severity, "responsible_party": row.responsible_party}))
     db.commit()
-    db.refresh(row)
-    return _damage_dict(row)
+    return {"status": "ok", "id": row.id}
 
 
-@app.get("/damages/{damage_id}/audit")
-def damage_audit(damage_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
-    if db.get(DamageReportDB, damage_id) is None:
-        raise HTTPException(status_code=404, detail="Damage report not found")
-    rows = db.scalars(select(DamageAuditDB).where(DamageAuditDB.damage_id == damage_id).order_by(DamageAuditDB.changed_at.desc()).limit(500)).all()
-    return [
-        {
-            "id": row.id,
-            "damage_id": row.damage_id,
-            "apartment": row.apartment,
-            "changed_at": row.changed_at.astimezone(timezone.utc).isoformat(),
-            "changed_by": row.changed_by,
-            "action": row.action,
-            "previous_values": row.previous_values,
-            "new_values": row.new_values,
-        }
-        for row in rows
-    ]
+@app.post("/allocate")
+def allocate(data: AllocationRequest, _: None = Depends(require_auth)):
+    try:
+        return assign_groups(data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
