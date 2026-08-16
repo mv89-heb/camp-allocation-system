@@ -2,6 +2,7 @@ services:
   - type: web
     name: camp-allocation-system
     runtime: python
+    autoDeploy: true
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.serve
     healthCheckPath: /health
