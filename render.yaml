@@ -10,7 +10,3 @@ services:
         value: 3.11.8
       - key: DATABASE_URL
         sync: false
-      - key: ADMIN_TOKEN
-        generateValue: true
-      - key: FIELD_TOKEN
-        generateValue: true
