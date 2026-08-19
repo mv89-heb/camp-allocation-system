@@ -5,10 +5,12 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.damage_catalog import validate_catalog_selection
+
 NonNegativeInt = Annotated[int, Field(ge=0, le=1000)]
 NonNegativeMoney = Annotated[Decimal, Field(ge=0, le=100000000, max_digits=12, decimal_places=2)]
 APARTMENT_PATTERN = r"^[0-9A-Za-z\u0590-\u05FF ._/#-]+$"
-DAMAGE_CATEGORIES = {"FURNITURE", "ELECTRICAL", "PLUMBING", "STRUCTURE", "CLEANLINESS", "HVAC", "OTHER"}
+DAMAGE_CATEGORIES = {"FURNITURE", "ELECTRICAL", "PLUMBING", "HVAC", "CLEANLINESS", "SAFETY", "STRUCTURE", "OTHER"}
 DAMAGE_SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 DAMAGE_STATUSES = {"OPEN", "INSPECTION", "IN_PROGRESS", "RESOLVED", "CLOSED"}
 AC_MODES = {"CENTRAL", "INDIVIDUAL"}
@@ -40,13 +42,11 @@ class RoomCreateRequest(BaseModel):
     ac_units_plan: NonNegativeInt = 0
     ac_remotes_plan: NonNegativeInt = 0
     ac_control_boxes_plan: NonNegativeInt = 1
-
     @field_validator("ac_mode")
     @classmethod
     def validate_ac_mode(cls, value: str) -> str:
-        value = value.upper()
-        if value not in AC_MODES:
-            raise ValueError("ac_mode must be CENTRAL or INDIVIDUAL")
+        value=value.upper()
+        if value not in AC_MODES: raise ValueError("ac_mode must be CENTRAL or INDIVIDUAL")
         return value
 
 class GroupAllocationRequest(BaseModel):
@@ -63,6 +63,8 @@ class DamageCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
     category: str = Field(min_length=2, max_length=40)
+    subcategory: str | None = Field(default=None, max_length=60)
+    item_name: str | None = Field(default=None, max_length=160)
     severity: str = Field(default="MEDIUM", min_length=3, max_length=20)
     description: str = Field(min_length=5, max_length=5000)
     estimated_cost: NonNegativeMoney | None = None
@@ -72,14 +74,12 @@ class DamageCreateRequest(BaseModel):
     @field_validator("category")
     @classmethod
     def validate_category(cls, value: str) -> str:
-        value=value.upper()
-        if value not in DAMAGE_CATEGORIES: raise ValueError(f"category must be one of: {', '.join(sorted(DAMAGE_CATEGORIES))}")
-        return value
+        return value.upper()
     @field_validator("severity")
     @classmethod
     def validate_severity(cls, value: str) -> str:
         value=value.upper()
-        if value not in DAMAGE_SEVERITIES: raise ValueError(f"severity must be one of: {', '.join(sorted(DAMAGE_SEVERITIES))}")
+        if value not in DAMAGE_SEVERITIES: raise ValueError("invalid damage severity")
         return value
     @field_validator("evidence_urls")
     @classmethod
@@ -88,6 +88,10 @@ class DamageCreateRequest(BaseModel):
             parsed=urlparse(value)
             if parsed.scheme not in {"http","https"} or not parsed.netloc: raise ValueError("evidence URLs must use http or https")
         return values
+    @model_validator(mode="after")
+    def validate_catalog(self):
+        validate_catalog_selection(self.category, self.subcategory, self.item_name)
+        return self
 
 class FieldRoomReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -104,6 +108,8 @@ class DamageUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     severity: str | None = None
     status: str | None = None
+    subcategory: str | None = Field(default=None, max_length=60)
+    item_name: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, min_length=5, max_length=5000)
     estimated_cost: NonNegativeMoney | None = None
     actual_cost: NonNegativeMoney | None = None
@@ -130,7 +136,7 @@ class DamageUpdateRequest(BaseModel):
         if values is None:return None
         for value in values:
             parsed=urlparse(value)
-            if parsed.scheme not in {"http","https"} or not parsed.netloc:raise ValueError("evidence URLs must use http or https")
+            if parsed.scheme not in {"http","https"} or not parsed.netloc: raise ValueError("evidence URLs must use http or https")
         return values
 
 class HealthResponse(BaseModel):
