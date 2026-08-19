@@ -10,7 +10,11 @@ from app.damage_catalog import validate_catalog_selection
 NonNegativeInt = Annotated[int, Field(ge=0, le=1000)]
 NonNegativeMoney = Annotated[Decimal, Field(ge=0, le=100000000, max_digits=12, decimal_places=2)]
 APARTMENT_PATTERN = r"^[0-9A-Za-z\u0590-\u05FF ._/#-]+$"
-DAMAGE_CATEGORIES = {"FURNITURE", "ELECTRICAL", "PLUMBING", "HVAC", "CLEANLINESS", "SAFETY", "STRUCTURE", "OTHER"}
+DAMAGE_CATEGORIES = {
+    "FURNITURE", "ELECTRICAL", "PLUMBING", "HVAC", "CLEANLINESS", "SAFETY", "STRUCTURE",
+    "DOORS_WINDOWS", "BATHROOM", "KITCHEN", "COMMUNICATION", "PEST_CONTROL", "EXTERIOR",
+    "SAFETY_SIGNAGE", "OTHER",
+}
 DAMAGE_SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 DAMAGE_STATUSES = {"OPEN", "INSPECTION", "IN_PROGRESS", "RESOLVED", "CLOSED"}
 AC_MODES = {"CENTRAL", "INDIVIDUAL"}
@@ -62,7 +66,6 @@ class AllocationRequest(BaseModel):
 class DamageCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
-    reporter_name: str = Field(default="", max_length=120)
     category: str = Field(min_length=2, max_length=40)
     subcategory: str | None = Field(default=None, max_length=60)
     item_name: str | None = Field(default=None, max_length=160)
