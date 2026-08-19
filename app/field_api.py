@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
 import re
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.damage_catalog import catalog_for_api
 from app.database import ActualDB, DamageAuditDB, DamageReportDB, InventoryAuditDB, RequirementDB, get_db, utc_now
 from app.models import ActualInventoryUpdate, DamageCreateRequest, FieldRoomReportRequest
 
@@ -18,8 +18,6 @@ def require_field_token(
     x_field_token: str | None = Header(default=None, alias="X-Field-Token"),
     x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
 ) -> str:
-    # Authentication is intentionally disabled for the current field workflow.
-    # Keep the dependency signature so it can be secured later without changing routes.
     return "field-reporter"
 
 
@@ -56,6 +54,11 @@ def _room_group(name: str) -> tuple[int, str]:
     return 5, "יחידות נוספות"
 
 
+@router.get("/damage-catalog")
+def damage_catalog(_: str = Depends(require_field_token)):
+    return catalog_for_api()
+
+
 @router.get("/rooms")
 def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_token)):
     requirements, actuals, names = _room_rows(db)
@@ -80,16 +83,58 @@ def field_rooms(db: Session = Depends(get_db), _: str = Depends(require_field_to
             "closets_req": getattr(req, "closets_std", 0) if req else 0,
             "ac_units_req": getattr(req, "ac_units_std", 0) if req else 0,
             "ac_remotes_req": getattr(req, "ac_remotes_std", 0) if req else 0,
+            "ac_control_boxes_req": getattr(req, "ac_control_boxes_std", 1) if req else 1,
             "beds_act": getattr(act, "beds", 0) if act else 0,
             "mattresses_act": getattr(act, "mattresses", 0) if act else 0,
             "closets_act": getattr(act, "closets", 0) if act else 0,
             "ac_units_act": getattr(act, "ac_units", 0) if act else 0,
             "ac_remotes_act": getattr(act, "ac_remotes", 0) if act else 0,
+            "ac_control_boxes_act": getattr(act, "ac_control_boxes", 0) if act else 0,
             "inventory_checked": bool(act and act.checked_at),
             "checked_at": act.checked_at.isoformat() if act and act.checked_at else None,
             "open_damage": bool(open_damage),
         })
     return out
+
+
+def _damage_dict(row: DamageReportDB) -> dict:
+    return {
+        "id": row.id,
+        "apartment": row.apartment,
+        "category": row.category,
+        "subcategory": row.subcategory,
+        "item_name": row.item_name,
+        "severity": row.severity,
+        "status": row.status,
+        "description": row.description,
+        "estimated_cost": float(row.estimated_cost) if row.estimated_cost is not None else None,
+        "responsible_party": row.responsible_party,
+        "resolution_notes": row.resolution_notes,
+        "evidence_urls": row.evidence_urls or [],
+        "reported_by": row.reported_by,
+        "reported_at": row.reported_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@router.get("/damages")
+def field_damages(
+    apartment: str | None = None,
+    category: str | None = None,
+    subcategory: str | None = None,
+    item_name: str | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_field_token),
+):
+    query = select(DamageReportDB)
+    if apartment: query = query.where(DamageReportDB.apartment == apartment.strip())
+    if category: query = query.where(DamageReportDB.category == category.upper())
+    if subcategory: query = query.where(DamageReportDB.subcategory == subcategory)
+    if item_name: query = query.where(DamageReportDB.item_name == item_name)
+    if status: query = query.where(DamageReportDB.status == status.upper())
+    rows = db.scalars(query.order_by(DamageReportDB.updated_at.desc()).limit(1000)).all()
+    return [_damage_dict(row) for row in rows]
 
 
 @router.post("/room-report")
@@ -100,10 +145,9 @@ def field_room_report(
 ):
     apartment = data.inventory.apartment
     if not _room_exists(db, apartment):
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Room/apartment does not exist")
     now = utc_now()
-    values = {f: getattr(data.inventory, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes")}
+    values = {f: getattr(data.inventory, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes", "ac_control_boxes")}
     record = db.scalar(select(ActualDB).where(ActualDB.apartment == apartment).with_for_update())
     previous = None
     try:
@@ -120,10 +164,34 @@ def field_room_report(
         db.add(InventoryAuditDB(apartment=apartment, changed_at=now, changed_by=actor, previous_values=previous, new_values=values))
         created = []
         for damage in data.damages:
-            row = DamageReportDB(apartment=apartment, category=damage.category, severity=damage.severity, status="OPEN", description=damage.description, estimated_cost=damage.estimated_cost, responsible_party=damage.responsible_party, resolution_notes=damage.resolution_notes, evidence_urls=damage.evidence_urls, reported_by=actor, reported_at=now, updated_by=actor, updated_at=now)
+            row = DamageReportDB(
+                apartment=apartment,
+                category=damage.category,
+                subcategory=damage.subcategory,
+                item_name=damage.item_name,
+                severity=damage.severity,
+                status="OPEN",
+                description=damage.description,
+                estimated_cost=damage.estimated_cost,
+                responsible_party=damage.responsible_party,
+                resolution_notes=damage.resolution_notes,
+                evidence_urls=damage.evidence_urls,
+                reported_by=data.reporter_name or actor,
+                reported_at=now,
+                updated_by=actor,
+                updated_at=now,
+            )
             db.add(row)
             db.flush()
-            db.add(DamageAuditDB(damage_id=row.id, apartment=apartment, changed_at=now, changed_by=actor, action="CREATED", previous_values=None, new_values={"id": row.id, "apartment": apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description}))
+            db.add(DamageAuditDB(
+                damage_id=row.id,
+                apartment=apartment,
+                changed_at=now,
+                changed_by=actor,
+                action="CREATED",
+                previous_values=None,
+                new_values=_damage_dict(row),
+            ))
             created.append(row.id)
         db.commit()
         return {"status": "success", "apartment": apartment, "checked_at": now, "damage_ids": created}
@@ -135,9 +203,8 @@ def field_room_report(
 @router.post("/inventory")
 def field_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), actor: str = Depends(require_field_token)):
     if not _room_exists(db, data.apartment):
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Room/apartment does not exist")
-    values = {f: getattr(data, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes")}
+    values = {f: getattr(data, f) for f in ("beds", "mattresses", "closets", "ac_units", "ac_remotes", "ac_control_boxes")}
     record = db.scalar(select(ActualDB).where(ActualDB.apartment == data.apartment).with_for_update())
     previous = None
     now = utc_now()
@@ -161,17 +228,32 @@ def field_inventory(data: ActualInventoryUpdate, db: Session = Depends(get_db), 
 @router.post("/damages", status_code=201)
 def field_damage(data: DamageCreateRequest, db: Session = Depends(get_db), actor: str = Depends(require_field_token)):
     if not _room_exists(db, data.apartment):
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Room/apartment does not exist")
     now = utc_now()
-    row = DamageReportDB(apartment=data.apartment, category=data.category, severity=data.severity, status="OPEN", description=data.description, estimated_cost=data.estimated_cost, responsible_party=data.responsible_party, resolution_notes=data.resolution_notes, evidence_urls=data.evidence_urls, reported_by=actor, reported_at=now, updated_by=actor, updated_at=now)
+    row = DamageReportDB(
+        apartment=data.apartment,
+        category=data.category,
+        subcategory=data.subcategory,
+        item_name=data.item_name,
+        severity=data.severity,
+        status="OPEN",
+        description=data.description,
+        estimated_cost=data.estimated_cost,
+        responsible_party=data.responsible_party,
+        resolution_notes=data.resolution_notes,
+        evidence_urls=data.evidence_urls,
+        reported_by=actor,
+        reported_at=now,
+        updated_by=actor,
+        updated_at=now,
+    )
     db.add(row)
     try:
         db.flush()
-        db.add(DamageAuditDB(damage_id=row.id, apartment=row.apartment, changed_at=now, changed_by=actor, action="CREATED", previous_values=None, new_values={"id": row.id, "apartment": row.apartment, "category": row.category, "severity": row.severity, "status": row.status, "description": row.description}))
+        db.add(DamageAuditDB(damage_id=row.id, apartment=row.apartment, changed_at=now, changed_by=actor, action="CREATED", previous_values=None, new_values=_damage_dict(row)))
         db.commit()
         db.refresh(row)
-        return {"id": row.id, "status": row.status, "apartment": row.apartment}
+        return _damage_dict(row)
     except Exception:
         db.rollback()
         raise
