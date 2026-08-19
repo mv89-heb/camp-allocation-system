@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
@@ -35,8 +35,6 @@ class RequirementDB(Base):
     __tablename__ = "requirements"
 
     apartment = Column(String(120), primary_key=True, index=True)
-    # A standard unit is the accounting unit for the current standard.
-    # It may contain one room, a pair such as 101-102, or a future larger group.
     standard_unit_id = Column(String(120), nullable=False, default="")
     standard_unit_label = Column(String(240), nullable=False, default="")
     beds_std = Column(Integer, nullable=False, default=4)
@@ -100,13 +98,43 @@ class DamageAuditDB(Base):
     __tablename__ = "damage_audit"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    damage_id = Column(Integer, nullable=False, index=True)
+    damage_id = Column(Integer, primary_key=False, autoincrement=False, nullable=False, index=True)
     apartment = Column(String(120), nullable=False, index=True)
     changed_at = Column(DateTime(timezone=True), nullable=False)
     changed_by = Column(String(120), nullable=False)
     action = Column(String(30), nullable=False)
     previous_values = Column(JSON, nullable=True)
     new_values = Column(JSON, nullable=False)
+
+
+def ensure_grouped_room_schema() -> None:
+    """Add grouped-standard columns to an existing database without replacing data."""
+    inspector = inspect(engine)
+    if not inspector.has_table("requirements"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("requirements")}
+    additions = {
+        "standard_unit_id": "VARCHAR(120)",
+        "standard_unit_label": "VARCHAR(240)",
+    }
+    with engine.begin() as conn:
+        for name, definition in additions.items():
+            if name not in columns:
+                conn.execute(text(f'ALTER TABLE requirements ADD COLUMN "{name}" {definition}'))
+        # Existing rows are deliberately assigned to themselves here. The
+        # repository bootstrap later applies the authoritative pair mapping.
+        conn.execute(text(
+            'UPDATE requirements SET "standard_unit_id" = COALESCE(NULLIF("standard_unit_id", \'\'), apartment) '
+            'WHERE "standard_unit_id" IS NULL OR "standard_unit_id" = \'\''
+        ))
+        conn.execute(text(
+            'UPDATE requirements SET "standard_unit_label" = COALESCE(NULLIF("standard_unit_label", \'\'), "standard_unit_id", apartment) '
+            'WHERE "standard_unit_label" IS NULL OR "standard_unit_label" = \'\''
+        ))
+
+
+# Safe, non-destructive migration for existing SQLite/Neon databases.
+ensure_grouped_room_schema()
 
 
 def database_backend() -> str:
