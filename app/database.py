@@ -11,16 +11,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
 FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 
-# Production must use the real Neon/PostgreSQL database.
 if not DATABASE_URL:
     if IS_PRODUCTION:
         raise RuntimeError(
             "DATABASE_URL is required in production. Configure the Neon PostgreSQL connection string."
         )
     DATABASE_URL = "sqlite:///./data/inventory.db"
-
-# Authentication is intentionally optional for the current field workflow.
-# It can be re-enabled later without changing the data model.
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -39,6 +35,10 @@ class RequirementDB(Base):
     __tablename__ = "requirements"
 
     apartment = Column(String(120), primary_key=True, index=True)
+    # A standard unit is the accounting unit for the current standard.
+    # It may contain one room, a pair such as 101-102, or a future larger group.
+    standard_unit_id = Column(String(120), nullable=False, default="")
+    standard_unit_label = Column(String(240), nullable=False, default="")
     beds_std = Column(Integer, nullable=False, default=4)
     mattresses_std = Column(Integer, nullable=False, default=4)
     closets_std = Column(Integer, nullable=False, default=4)
