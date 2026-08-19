@@ -32,7 +32,6 @@ class RequirementDB(Base):
     beds_std = Column(Integer, nullable=False, default=4)
     mattresses_std = Column(Integer, nullable=False, default=4)
     closets_std = Column(Integer, nullable=False, default=4)
-    # AC is now explicitly modeled: CENTRAL is the default; INDIVIDUAL is for exceptions.
     ac_mode = Column(String(20), nullable=False, default="CENTRAL")
     ac_units_std = Column(Integer, nullable=False, default=0)
     ac_remotes_std = Column(Integer, nullable=False, default=0)
@@ -73,6 +72,8 @@ class DamageReportDB(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     apartment = Column(String(120), nullable=False, index=True)
     category = Column(String(40), nullable=False, index=True)
+    subcategory = Column(String(60), nullable=True, index=True)
+    item_name = Column(String(160), nullable=True, index=True)
     severity = Column(String(20), nullable=False, index=True)
     status = Column(String(20), nullable=False, default="OPEN", index=True)
     description = Column(Text, nullable=False)
@@ -107,6 +108,7 @@ def ensure_grouped_room_schema() -> None:
         return
     req_columns = {c["name"] for c in inspector.get_columns("requirements")}
     actual_columns = {c["name"] for c in inspector.get_columns("actuals")} if inspector.has_table("actuals") else set()
+    damage_columns = {c["name"] for c in inspector.get_columns("damage_reports")} if inspector.has_table("damage_reports") else set()
     req_additions = {
         "standard_unit_id": "VARCHAR(120)",
         "standard_unit_label": "VARCHAR(240)",
@@ -115,6 +117,10 @@ def ensure_grouped_room_schema() -> None:
         "ac_control_boxes_plan": "INTEGER DEFAULT 1",
     }
     actual_additions = {"ac_control_boxes": "INTEGER DEFAULT 0"}
+    damage_additions = {
+        "subcategory": "VARCHAR(60)",
+        "item_name": "VARCHAR(160)",
+    }
     with engine.begin() as conn:
         for name, definition in req_additions.items():
             if name not in req_columns:
@@ -122,6 +128,9 @@ def ensure_grouped_room_schema() -> None:
         for name, definition in actual_additions.items():
             if name not in actual_columns:
                 conn.execute(text(f'ALTER TABLE actuals ADD COLUMN "{name}" {definition}'))
+        for name, definition in damage_additions.items():
+            if name not in damage_columns:
+                conn.execute(text(f'ALTER TABLE damage_reports ADD COLUMN "{name}" {definition}'))
         conn.execute(text(
             'UPDATE requirements SET "standard_unit_id" = COALESCE(NULLIF("standard_unit_id", \'\'), apartment) '
             'WHERE "standard_unit_id" IS NULL OR "standard_unit_id" = \'\''
@@ -130,9 +139,6 @@ def ensure_grouped_room_schema() -> None:
             'UPDATE requirements SET "standard_unit_label" = COALESCE(NULLIF("standard_unit_label", \'\'), "standard_unit_id", apartment) '
             'WHERE "standard_unit_label" IS NULL OR "standard_unit_label" = \'\''
         ))
-        # Existing installations used ac_units/ac_remotes for every room. Do not
-        # rewrite checked inventory; only give legacy requirements a safe central
-        # default until a room is explicitly marked as an individual-AC exception.
         conn.execute(text(
             'UPDATE requirements SET "ac_mode" = COALESCE(NULLIF("ac_mode", \'\'), \'CENTRAL\') '
             'WHERE "ac_mode" IS NULL OR "ac_mode" = \'\''
