@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Integer, JSON, Numeric, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-
 ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or os.getenv("RENDER", "").strip().lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -13,11 +12,8 @@ FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 
 if not DATABASE_URL:
     if IS_PRODUCTION:
-        raise RuntimeError(
-            "DATABASE_URL is required in production. Configure the Neon PostgreSQL connection string."
-        )
+        raise RuntimeError("DATABASE_URL is required in production. Configure the Neon PostgreSQL connection string.")
     DATABASE_URL = "sqlite:///./data/inventory.db"
-
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -25,7 +21,6 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 engine_kwargs = {"pool_pre_ping": True, "future": True}
 if not DATABASE_URL.startswith("sqlite"):
     engine_kwargs.update({"pool_size": 5, "max_overflow": 10})
-
 engine = create_engine(DATABASE_URL, connect_args=connect_args, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 Base = declarative_base()
@@ -33,7 +28,6 @@ Base = declarative_base()
 
 class RequirementDB(Base):
     __tablename__ = "requirements"
-
     apartment = Column(String(120), primary_key=True, index=True)
     standard_unit_id = Column(String(120), nullable=False, default="")
     standard_unit_label = Column(String(240), nullable=False, default="")
@@ -51,7 +45,6 @@ class RequirementDB(Base):
 
 class ActualDB(Base):
     __tablename__ = "actuals"
-
     apartment = Column(String(120), primary_key=True, index=True)
     beds = Column(Integer, nullable=False, default=0)
     mattresses = Column(Integer, nullable=False, default=0)
@@ -64,7 +57,6 @@ class ActualDB(Base):
 
 class InventoryAuditDB(Base):
     __tablename__ = "inventory_audit"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     apartment = Column(String(120), nullable=False, index=True)
     changed_at = Column(DateTime(timezone=True), nullable=False)
@@ -75,7 +67,6 @@ class InventoryAuditDB(Base):
 
 class DamageReportDB(Base):
     __tablename__ = "damage_reports"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     apartment = Column(String(120), nullable=False, index=True)
     category = Column(String(40), nullable=False, index=True)
@@ -96,9 +87,8 @@ class DamageReportDB(Base):
 
 class DamageAuditDB(Base):
     __tablename__ = "damage_audit"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
-    damage_id = Column(Integer, primary_key=False, autoincrement=False, nullable=False, index=True)
+    damage_id = Column(Integer, nullable=False, index=True)
     apartment = Column(String(120), nullable=False, index=True)
     changed_at = Column(DateTime(timezone=True), nullable=False)
     changed_by = Column(String(120), nullable=False)
@@ -113,16 +103,11 @@ def ensure_grouped_room_schema() -> None:
     if not inspector.has_table("requirements"):
         return
     columns = {column["name"] for column in inspector.get_columns("requirements")}
-    additions = {
-        "standard_unit_id": "VARCHAR(120)",
-        "standard_unit_label": "VARCHAR(240)",
-    }
+    additions = {"standard_unit_id": "VARCHAR(120)", "standard_unit_label": "VARCHAR(240)"}
     with engine.begin() as conn:
         for name, definition in additions.items():
             if name not in columns:
                 conn.execute(text(f'ALTER TABLE requirements ADD COLUMN "{name}" {definition}'))
-        # Existing rows are deliberately assigned to themselves here. The
-        # repository bootstrap later applies the authoritative pair mapping.
         conn.execute(text(
             'UPDATE requirements SET "standard_unit_id" = COALESCE(NULLIF("standard_unit_id", \'\'), apartment) '
             'WHERE "standard_unit_id" IS NULL OR "standard_unit_id" = \'\''
@@ -133,7 +118,6 @@ def ensure_grouped_room_schema() -> None:
         ))
 
 
-# Safe, non-destructive migration for existing SQLite/Neon databases.
 ensure_grouped_room_schema()
 
 
