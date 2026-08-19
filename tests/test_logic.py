@@ -6,20 +6,8 @@ from app.logic import compute_gaps
 
 def requirements():
     return pd.DataFrame([
-        {
-            "apartment": "101",
-            "standard_unit_id": "101-102",
-            "standard_unit_label": "חדרים 101-102",
-            "beds_std": 4, "mattresses_std": 4, "closets_std": 4, "ac_units_std": 4, "ac_remotes_std": 1,
-            "beds_plan": 6, "mattresses_plan": 6, "closets_plan": 6, "ac_units_plan": 4, "ac_remotes_plan": 1,
-        },
-        {
-            "apartment": "102",
-            "standard_unit_id": "101-102",
-            "standard_unit_label": "חדרים 101-102",
-            "beds_std": 4, "mattresses_std": 4, "closets_std": 4, "ac_units_std": 4, "ac_remotes_std": 1,
-            "beds_plan": 6, "mattresses_plan": 6, "closets_plan": 6, "ac_units_plan": 4, "ac_remotes_plan": 1,
-        },
+        {"apartment": "101", "standard_unit_id": "101-102", "standard_unit_label": "חדרים 101-102", "beds_std": 4, "mattresses_std": 4, "closets_std": 4, "ac_units_std": 4, "ac_remotes_std": 1, "beds_plan": 6, "mattresses_plan": 6, "closets_plan": 6, "ac_units_plan": 4, "ac_remotes_plan": 1},
+        {"apartment": "102", "standard_unit_id": "101-102", "standard_unit_label": "חדרים 101-102", "beds_std": 4, "mattresses_std": 4, "closets_std": 4, "ac_units_std": 4, "ac_remotes_std": 1, "beds_plan": 6, "mattresses_plan": 6, "closets_plan": 6, "ac_units_plan": 4, "ac_remotes_plan": 1},
     ])
 
 
@@ -46,8 +34,8 @@ def test_each_room_remains_independently_reportable():
     room_102 = result[result["apartment"] == "102"].iloc[0]
     assert room_101["beds_act"] == 2
     assert room_102["beds_act"] == 2
-    assert room_101["inventory_checked"] is True
-    assert room_102["inventory_checked"] is True
+    assert bool(room_101["inventory_checked"])
+    assert bool(room_102["inventory_checked"])
 
 
 def test_partial_pair_is_not_reported_as_complete():
@@ -55,8 +43,8 @@ def test_partial_pair_is_not_reported_as_complete():
     result = compute_gaps(requirements(), partial, "std")
     row = result[result["apartment"] == "101"].iloc[0]
     assert row["unit_checked_count"] == 1
-    assert row["unit_inventory_partial"] is True
-    assert row["unit_inventory_complete"] is False
+    assert bool(row["unit_inventory_partial"])
+    assert not bool(row["unit_inventory_complete"])
     assert row["unit_status"] == "הצמד נבדק חלקית"
 
 
