@@ -40,6 +40,7 @@ from app.models import (
     DamageCreateRequest,
     DamageUpdateRequest,
     HealthResponse,
+    RoomCreateRequest,
 )
 from app.rules import assign_groups
 
@@ -51,7 +52,7 @@ STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Camp Allocation System", version="2.1.2")
+app = FastAPI(title="Camp Allocation System", version="2.2.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 allowed_hosts = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["*"])
@@ -138,7 +139,6 @@ def ensure_schema() -> None:
 
 
 def _assert_canonical_schema() -> None:
-    """Fail with a useful message if a deployment still points at an incompatible DB."""
     required = {
         "requirements": {
             "apartment",
@@ -155,7 +155,6 @@ def _assert_canonical_schema() -> None:
 
 
 def _bootstrap_production_data() -> None:
-    """Reconcile repository snapshots into Neon during every production startup."""
     if not os.getenv("DATABASE_URL", "").strip():
         return
     if os.getenv("DISABLE_PRODUCTION_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes"}:
@@ -279,6 +278,105 @@ def audit(apartment: str, db: Session = Depends(get_db), _: None = Depends(requi
         }
         for row in rows
     ]
+
+
+@app.get("/field-api/rooms")
+def list_rooms(db: Session = Depends(get_db), _: None = Depends(require_auth)):
+    """Return the canonical room list for field/mobile workflows."""
+    rows = db.execute(
+        select(RequirementDB, ActualDB)
+        .outerjoin(ActualDB, ActualDB.apartment == RequirementDB.apartment)
+        .order_by(RequirementDB.apartment.asc())
+        .limit(MAX_ROWS)
+    ).all()
+    result = []
+    for requirement, actual in rows:
+        result.append({
+            "apartment": requirement.apartment,
+            "group": "קרוואנים" if "קרוון" in requirement.apartment or "קרוואן" in requirement.apartment else "חדרים",
+            "inventory_checked": bool(actual and actual.checked_at),
+            "checked_at": actual.checked_at.astimezone(timezone.utc).isoformat() if actual and actual.checked_at else None,
+            "beds_act": actual.beds if actual else 0,
+            "mattresses_act": actual.mattresses if actual else 0,
+            "closets_act": actual.closets if actual else 0,
+            "ac_units_act": actual.ac_units if actual else 0,
+            "ac_remotes_act": actual.ac_remotes if actual else 0,
+        })
+    return result
+
+
+@app.post("/rooms", status_code=201)
+def create_room(
+    data: RoomCreateRequest,
+    db: Session = Depends(get_db),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    """Create a room requirement and its initial unverified inventory row atomically."""
+    if not _safe_token_equal(x_admin_token):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    apartment = data.apartment.strip()
+    actor = _actor(x_admin_token)
+    if db.get(RequirementDB, apartment) is not None:
+        raise HTTPException(status_code=409, detail="Room/apartment already exists")
+    if db.get(ActualDB, apartment) is not None:
+        raise HTTPException(status_code=409, detail="Room/apartment already exists in inventory")
+    try:
+        requirement = RequirementDB(
+            apartment=apartment,
+            beds_std=data.beds_std,
+            mattresses_std=data.mattresses_std,
+            closets_std=data.closets_std,
+            ac_units_std=data.ac_units_std,
+            ac_remotes_std=data.ac_remotes_std,
+            beds_plan=data.beds_plan,
+            mattresses_plan=data.mattresses_plan,
+            closets_plan=data.closets_plan,
+            ac_units_plan=data.ac_units_plan,
+            ac_remotes_plan=data.ac_remotes_plan,
+        )
+        actual = ActualDB(
+            apartment=apartment,
+            beds=0,
+            mattresses=0,
+            closets=0,
+            ac_units=0,
+            ac_remotes=0,
+            checked_at=None,
+            checked_by=None,
+        )
+        db.add(requirement)
+        db.add(actual)
+        db.add(InventoryAuditDB(
+            apartment=apartment,
+            changed_at=utc_now(),
+            changed_by=actor,
+            previous_values=None,
+            new_values={
+                "action": "ROOM_CREATED",
+                "requirements": {
+                    "beds_std": data.beds_std,
+                    "mattresses_std": data.mattresses_std,
+                    "closets_std": data.closets_std,
+                    "ac_units_std": data.ac_units_std,
+                    "ac_remotes_std": data.ac_remotes_std,
+                    "beds_plan": data.beds_plan,
+                    "mattresses_plan": data.mattresses_plan,
+                    "closets_plan": data.closets_plan,
+                    "ac_units_plan": data.ac_units_plan,
+                    "ac_remotes_plan": data.ac_remotes_plan,
+                },
+                "inventory": {"beds": 0, "mattresses": 0, "closets": 0, "ac_units": 0, "ac_remotes": 0},
+            },
+        ))
+        db.commit()
+        return {"status": "success", "apartment": apartment, "inventory_checked": False}
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Room already exists; please refresh and retry") from exc
+    except Exception:
+        db.rollback()
+        logger.exception("Room creation failed for apartment=%s", apartment)
+        raise HTTPException(status_code=500, detail="Unable to create room")
 
 
 @app.post("/allocate")
