@@ -7,8 +7,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or os.getenv("RENDER", "").strip().lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "").strip()
-FIELD_TOKEN = os.getenv("FIELD_TOKEN", "").strip()
 
 if not DATABASE_URL:
     if IS_PRODUCTION:
@@ -34,13 +32,17 @@ class RequirementDB(Base):
     beds_std = Column(Integer, nullable=False, default=4)
     mattresses_std = Column(Integer, nullable=False, default=4)
     closets_std = Column(Integer, nullable=False, default=4)
-    ac_units_std = Column(Integer, nullable=False, default=4)
-    ac_remotes_std = Column(Integer, nullable=False, default=1)
+    # AC is now explicitly modeled: CENTRAL is the default; INDIVIDUAL is for exceptions.
+    ac_mode = Column(String(20), nullable=False, default="CENTRAL")
+    ac_units_std = Column(Integer, nullable=False, default=0)
+    ac_remotes_std = Column(Integer, nullable=False, default=0)
+    ac_control_boxes_std = Column(Integer, nullable=False, default=1)
     beds_plan = Column(Integer, nullable=False, default=6)
     mattresses_plan = Column(Integer, nullable=False, default=6)
     closets_plan = Column(Integer, nullable=False, default=6)
-    ac_units_plan = Column(Integer, nullable=False, default=4)
-    ac_remotes_plan = Column(Integer, nullable=False, default=1)
+    ac_units_plan = Column(Integer, nullable=False, default=0)
+    ac_remotes_plan = Column(Integer, nullable=False, default=0)
+    ac_control_boxes_plan = Column(Integer, nullable=False, default=1)
 
 
 class ActualDB(Base):
@@ -51,6 +53,7 @@ class ActualDB(Base):
     closets = Column(Integer, nullable=False, default=0)
     ac_units = Column(Integer, nullable=False, default=0)
     ac_remotes = Column(Integer, nullable=False, default=0)
+    ac_control_boxes = Column(Integer, nullable=False, default=0)
     checked_at = Column(DateTime(timezone=True), nullable=True)
     checked_by = Column(String(120), nullable=True)
 
@@ -98,16 +101,27 @@ class DamageAuditDB(Base):
 
 
 def ensure_grouped_room_schema() -> None:
-    """Add grouped-standard columns to an existing database without replacing data."""
+    """Upgrade existing databases without replacing any existing data."""
     inspector = inspect(engine)
     if not inspector.has_table("requirements"):
         return
-    columns = {column["name"] for column in inspector.get_columns("requirements")}
-    additions = {"standard_unit_id": "VARCHAR(120)", "standard_unit_label": "VARCHAR(240)"}
+    req_columns = {c["name"] for c in inspector.get_columns("requirements")}
+    actual_columns = {c["name"] for c in inspector.get_columns("actuals")} if inspector.has_table("actuals") else set()
+    req_additions = {
+        "standard_unit_id": "VARCHAR(120)",
+        "standard_unit_label": "VARCHAR(240)",
+        "ac_mode": "VARCHAR(20) DEFAULT 'CENTRAL'",
+        "ac_control_boxes_std": "INTEGER DEFAULT 1",
+        "ac_control_boxes_plan": "INTEGER DEFAULT 1",
+    }
+    actual_additions = {"ac_control_boxes": "INTEGER DEFAULT 0"}
     with engine.begin() as conn:
-        for name, definition in additions.items():
-            if name not in columns:
+        for name, definition in req_additions.items():
+            if name not in req_columns:
                 conn.execute(text(f'ALTER TABLE requirements ADD COLUMN "{name}" {definition}'))
+        for name, definition in actual_additions.items():
+            if name not in actual_columns:
+                conn.execute(text(f'ALTER TABLE actuals ADD COLUMN "{name}" {definition}'))
         conn.execute(text(
             'UPDATE requirements SET "standard_unit_id" = COALESCE(NULLIF("standard_unit_id", \'\'), apartment) '
             'WHERE "standard_unit_id" IS NULL OR "standard_unit_id" = \'\''
@@ -115,6 +129,17 @@ def ensure_grouped_room_schema() -> None:
         conn.execute(text(
             'UPDATE requirements SET "standard_unit_label" = COALESCE(NULLIF("standard_unit_label", \'\'), "standard_unit_id", apartment) '
             'WHERE "standard_unit_label" IS NULL OR "standard_unit_label" = \'\''
+        ))
+        # Existing installations used ac_units/ac_remotes for every room. Do not
+        # rewrite checked inventory; only give legacy requirements a safe central
+        # default until a room is explicitly marked as an individual-AC exception.
+        conn.execute(text(
+            'UPDATE requirements SET "ac_mode" = COALESCE(NULLIF("ac_mode", \'\'), \'CENTRAL\') '
+            'WHERE "ac_mode" IS NULL OR "ac_mode" = \'\''
+        ))
+        conn.execute(text(
+            'UPDATE requirements SET "ac_control_boxes_std" = COALESCE("ac_control_boxes_std", 1), '
+            '"ac_control_boxes_plan" = COALESCE("ac_control_boxes_plan", 1)'
         ))
 
 
