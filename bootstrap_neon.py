@@ -1,9 +1,4 @@
-"""Safely reconcile repository inventory snapshots with Neon.
-
-Physical inventory stays at room level. The official standard is attached to an
-explicit standard unit, which may contain one room or multiple rooms such as
-101-102. This file is idempotent and never overwrites a physically checked room.
-"""
+"""Safely reconcile repository inventory snapshots with Neon and seed the centralized maintenance report."""
 from __future__ import annotations
 
 import csv
@@ -14,6 +9,7 @@ from sqlalchemy import select
 
 from app.database import ActualDB, Base, RequirementDB, SessionLocal, engine
 from app.main import ensure_schema
+from app.maintenance_seed import seed_maintenance_issues
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -95,14 +91,9 @@ def main() -> None:
 
             mapping = unit_map.get(apartment)
             if not mapping or not mapping["standard_unit_id"]:
-                # An unmapped room remains a one-room standard unit. This keeps
-                # the bootstrap safe if a new room is added before its mapping.
                 mapping = {"standard_unit_id": apartment, "standard_unit_label": apartment}
 
-            expected = {
-                **requirement_values(row),
-                **mapping,
-            }
+            expected = {**requirement_values(row), **mapping}
             record = existing_req.get(apartment)
             if record is None:
                 db.add(RequirementDB(apartment=apartment, **expected))
@@ -143,11 +134,13 @@ def main() -> None:
     finally:
         db.close()
 
+    inserted_damages, skipped_rooms = seed_maintenance_issues()
     print(
         "Neon bootstrap complete: "
         f"requirements_added={added_req}, requirements_updated={updated_req}, "
         f"actuals_added={added_actual}, actuals_repaired={repaired_actual}, "
-        f"old_bootstrap_checks_reset={reset_bootstrap}"
+        f"old_bootstrap_checks_reset={reset_bootstrap}, "
+        f"maintenance_issues_added={inserted_damages}, maintenance_rooms_missing={skipped_rooms}"
     )
 
 
