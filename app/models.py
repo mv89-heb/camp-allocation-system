@@ -45,7 +45,7 @@ class RoomCreateRequest(BaseModel):
     @field_validator("ac_mode")
     @classmethod
     def validate_ac_mode(cls, value: str) -> str:
-        value=value.upper()
+        value = value.upper()
         if value not in AC_MODES: raise ValueError("ac_mode must be CENTRAL or INDIVIDUAL")
         return value
 
@@ -73,8 +73,7 @@ class DamageCreateRequest(BaseModel):
     evidence_urls: list[str] = Field(default_factory=list, max_length=10)
     @field_validator("category")
     @classmethod
-    def validate_category(cls, value: str) -> str:
-        return value.upper()
+    def validate_category(cls, value: str) -> str: return value.upper()
     @field_validator("severity")
     @classmethod
     def validate_severity(cls, value: str) -> str:
@@ -136,7 +135,7 @@ class DamageUpdateRequest(BaseModel):
         if values is None:return None
         for value in values:
             parsed=urlparse(value)
-            if parsed.scheme not in {"http","https"} or not parsed.netloc: raise ValueError("evidence URLs must use http or https")
+            if parsed.scheme not in {"http","https"} or not parsed.netloc:raise ValueError("evidence URLs must use http or https")
         return values
 
 class HealthResponse(BaseModel):
