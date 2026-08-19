@@ -62,6 +62,7 @@ class AllocationRequest(BaseModel):
 class DamageCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
+    reporter_name: str = Field(default="", max_length=120)
     category: str = Field(min_length=2, max_length=40)
     subcategory: str | None = Field(default=None, max_length=60)
     item_name: str | None = Field(default=None, max_length=160)
