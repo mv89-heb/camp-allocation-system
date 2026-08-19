@@ -1,21 +1,8 @@
-"""Safely reconcile the versioned room snapshot with the Neon database.
+"""Safely reconcile repository inventory snapshots with Neon.
 
-The repository snapshot is reference data, not a physical inspection.
-A room imported from ``actual_inventory.csv`` must therefore remain
-``unchecked`` until a user explicitly saves a physical inventory check.
-
-Rules:
-- Neon is the production database; never drop or replace tables.
-- requirements are reconciled to the repository's canonical inventory.csv snapshot.
-- actual inventory values are restored from actual_inventory.csv without marking
-  the room as physically checked.
-- a real zero snapshot remains zero and unchecked.
-- an already physically checked actual inventory row is never overwritten.
-- rows created by older versions of this bootstrap (checked_by=
-  ``repository-bootstrap``) are repaired back to unchecked because that marker
-  never represented a physical inspection.
-
-The script is idempotent and safe to run on every Render start.
+Physical inventory stays at room level. The official standard is attached to an
+explicit standard unit, which may contain one room or multiple rooms such as
+101-102. This file is idempotent and never overwrites a physically checked room.
 """
 from __future__ import annotations
 
@@ -74,6 +61,15 @@ def main() -> None:
     Base.metadata.create_all(bind=engine)
 
     requirements_snapshot = read_csv("inventory.csv")
+    unit_rows = read_csv("room_units.csv")
+    unit_map = {
+        (row.get("apartment") or "").strip(): {
+            "standard_unit_id": (row.get("standard_unit_id") or "").strip(),
+            "standard_unit_label": (row.get("standard_unit_label") or "").strip(),
+        }
+        for row in unit_rows
+        if (row.get("apartment") or "").strip()
+    }
     actual_snapshot = {
         (row.get("apartment") or "").strip(): row
         for row in read_csv("actual_inventory.csv")
@@ -86,8 +82,6 @@ def main() -> None:
         existing_req = {row.apartment: row for row in db.scalars(select(RequirementDB)).all()}
         existing_actual = {row.apartment: row for row in db.scalars(select(ActualDB)).all()}
 
-        # Repair rows produced by the previous bootstrap implementation.
-        # ``repository-bootstrap`` was never a physical inspection.
         for actual in existing_actual.values():
             if actual.checked_by == "repository-bootstrap":
                 actual.checked_at = None
@@ -99,7 +93,16 @@ def main() -> None:
             if not apartment:
                 continue
 
-            expected = requirement_values(row)
+            mapping = unit_map.get(apartment)
+            if not mapping or not mapping["standard_unit_id"]:
+                # An unmapped room remains a one-room standard unit. This keeps
+                # the bootstrap safe if a new room is added before its mapping.
+                mapping = {"standard_unit_id": apartment, "standard_unit_label": apartment}
+
+            expected = {
+                **requirement_values(row),
+                **mapping,
+            }
             record = existing_req.get(apartment)
             if record is None:
                 db.add(RequirementDB(apartment=apartment, **expected))
@@ -120,23 +123,13 @@ def main() -> None:
             values = actual_values(snapshot)
             actual = existing_actual.get(apartment)
             if actual is None:
-                # Import reference values, but DO NOT mark the room checked.
-                db.add(ActualDB(
-                    apartment=apartment,
-                    **values,
-                    checked_at=None,
-                    checked_by=None,
-                ))
+                db.add(ActualDB(apartment=apartment, **values, checked_at=None, checked_by=None))
                 added_actual += 1
                 continue
 
-            # A physically checked row is authoritative and must never be
-            # overwritten by the repository snapshot.
             if actual.checked_at is not None:
                 continue
 
-            # For an unchecked row, keep the repository values visible in the
-            # application. They remain reference values until a physical check.
             current = {field: int(getattr(actual, field) or 0) for field in FIELDS}
             if current != values:
                 for field, value in values.items():
@@ -152,10 +145,8 @@ def main() -> None:
 
     print(
         "Neon bootstrap complete: "
-        f"requirements_added={added_req}, "
-        f"requirements_updated={updated_req}, "
-        f"actuals_added={added_actual}, "
-        f"actuals_repaired={repaired_actual}, "
+        f"requirements_added={added_req}, requirements_updated={updated_req}, "
+        f"actuals_added={added_actual}, actuals_repaired={repaired_actual}, "
         f"old_bootstrap_checks_reset={reset_bootstrap}"
     )
 
