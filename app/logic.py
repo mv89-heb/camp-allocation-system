@@ -4,8 +4,7 @@ import pandas as pd
 
 VALID_MODES = {"std", "plan"}
 BASE_INVENTORY_FIELDS = ("beds", "mattresses", "closets")
-AC_INVENTORY_FIELDS = ("ac_units", "ac_remotes", "ac_control_boxes")
-INVENTORY_FIELDS = BASE_INVENTORY_FIELDS + AC_INVENTORY_FIELDS
+INVENTORY_FIELDS = BASE_INVENTORY_FIELDS + ("ac_units", "ac_remotes", "ac_control_boxes")
 
 
 def validate_mode(mode: str) -> str:
@@ -14,47 +13,36 @@ def validate_mode(mode: str) -> str:
     return mode
 
 
-def _normalise_ac_requirements(req: pd.DataFrame, suffix: str) -> pd.DataFrame:
-    """Make the AC standard explicit.
-
-    CENTRAL rooms are checked by control-box count. INDIVIDUAL rooms are checked
-    by AC-unit/remote counts. Legacy rows without ac_mode are treated as CENTRAL
-    so the field workflow does not falsely require four individual AC units.
-    """
-    req = req.copy()
-    if "ac_mode" not in req.columns:
-        req["ac_mode"] = "CENTRAL"
-    req["ac_mode"] = req["ac_mode"].fillna("CENTRAL").astype(str).str.upper()
-    req.loc[~req["ac_mode"].isin({"CENTRAL", "INDIVIDUAL"}), "ac_mode"] = "CENTRAL"
-
-    for field in AC_INVENTORY_FIELDS:
-        col = f"{field}{suffix}"
-        if col not in req.columns:
-            req[col] = 0
-
-    central = req["ac_mode"] == "CENTRAL"
-    # Central AC: ignore legacy individual-unit requirements and require one
-    # control box by default. Individual AC rooms retain their explicit counts.
-    req.loc[central, f"ac_units{suffix}"] = 0
-    req.loc[central, f"ac_remotes{suffix}"] = 0
-    req.loc[central & (pd.to_numeric(req[f"ac_control_boxes{suffix}"], errors="coerce").fillna(0) <= 0), f"ac_control_boxes{suffix}"] = 1
-    req.loc[~central, f"ac_control_boxes{suffix}"] = 0
-    return req
-
-
 def compute_gaps(req_df: pd.DataFrame, act_df: pd.DataFrame, mode: str = "std") -> pd.DataFrame:
     validate_mode(mode)
     suffix = "_std" if mode == "std" else "_plan"
     req = req_df.copy()
     act = act_df.copy() if act_df is not None else pd.DataFrame()
-    required_columns = {"apartment", *(f"{field}{suffix}" for field in BASE_INVENTORY_FIELDS)}
-    missing = required_columns - set(req.columns)
-    if missing:
-        raise ValueError(f"requirements is missing columns: {', '.join(sorted(missing))}")
+
+    for field in BASE_INVENTORY_FIELDS:
+        col = f"{field}{suffix}"
+        if col not in req.columns:
+            raise ValueError(f"requirements is missing columns: {col}")
+    if "ac_mode" not in req.columns:
+        req["ac_mode"] = "CENTRAL"
+    req["ac_mode"] = req["ac_mode"].fillna("CENTRAL").astype(str).str.upper()
+    req.loc[~req["ac_mode"].isin({"CENTRAL", "INDIVIDUAL"}), "ac_mode"] = "CENTRAL"
+
+    # Central AC: the requirement is one control box, not several individual
+    # wall units. Individual rooms keep their explicit AC-unit/remote standard.
+    for field in ("ac_units", "ac_remotes", "ac_control_boxes"):
+        col = f"{field}{suffix}"
+        if col not in req.columns:
+            req[col] = 0
+    central = req["ac_mode"] == "CENTRAL"
+    req.loc[central, f"ac_units{suffix}"] = 0
+    req.loc[central, f"ac_remotes{suffix}"] = 0
+    req.loc[central & (pd.to_numeric(req[f"ac_control_boxes{suffix}"], errors="coerce").fillna(0) <= 0), f"ac_control_boxes{suffix}"] = 1
+    req.loc[~central, f"ac_control_boxes{suffix}"] = 0
 
     req["apartment"] = req["apartment"].astype(str).str.strip()
     if "apartment" not in act.columns:
-        act = pd.DataFrame(columns=["apartment", *INVENTORY_FIELDS, "checked_at", "checked_by"])
+        act = pd.DataFrame(columns=["apartment", "beds", "mattresses", "closets", "ac_units", "ac_remotes", "ac_control_boxes", "checked_at", "checked_by"])
     else:
         act["apartment"] = act["apartment"].astype(str).str.strip()
 
@@ -70,16 +58,9 @@ def compute_gaps(req_df: pd.DataFrame, act_df: pd.DataFrame, mode: str = "std") 
         req[column] = req[column].fillna("").astype(str).str.strip()
         req.loc[req[column] == "", column] = req.loc[req[column] == "", "apartment"]
 
-    req = _normalise_ac_requirements(req, suffix)
-    required_all = {"apartment", *(f"{field}{suffix}" for field in INVENTORY_FIELDS)}
-    missing = required_all - set(req.columns)
-    if missing:
-        raise ValueError(f"requirements is missing columns: {', '.join(sorted(missing))}")
-
     req = req[["apartment", "standard_unit_id", "standard_unit_label", "ac_mode", *[f"{field}{suffix}" for field in INVENTORY_FIELDS]]]
     req = req.rename(columns={f"{field}{suffix}": f"{field}_req" for field in INVENTORY_FIELDS})
 
-    actual_columns = ["apartment", *[field for field in INVENTORY_FIELDS if field in act.columns]]
     for field in INVENTORY_FIELDS:
         if field not in act.columns:
             act[field] = 0
@@ -89,6 +70,15 @@ def compute_gaps(req_df: pd.DataFrame, act_df: pd.DataFrame, mode: str = "std") 
     if "checked_by" in act.columns:
         actual_columns.append("checked_by")
     act = act[actual_columns].rename(columns={field: f"{field}_act" for field in INVENTORY_FIELDS})
+
+    # Backward compatibility: before the new column existed, the field app used
+    # ac_remotes as the only AC-related physical count. For CENTRAL rooms this is
+    # now interpreted as the number of control boxes.
+    central_rows = req["ac_mode"].eq("CENTRAL")
+    if "ac_control_boxes_act" in act.columns:
+        missing_box = act["ac_control_boxes_act"].fillna(0).eq(0)
+        act.loc[missing_box, "ac_control_boxes_act"] = act.loc[missing_box, "ac_remotes_act"]
+    act.loc[:, "ac_remotes_act"] = act["ac_remotes_act"].fillna(0)
 
     merged = req.merge(act, on="apartment", how="left", validate="one_to_one")
     for field in INVENTORY_FIELDS:
@@ -100,16 +90,20 @@ def compute_gaps(req_df: pd.DataFrame, act_df: pd.DataFrame, mode: str = "std") 
         if (merged[req_col] < 0).any() or (merged[act_col] < 0).any():
             raise ValueError(f"negative inventory value found for {field}")
 
+    # A central room must not be judged by the legacy individual-unit fields.
+    central_mask = merged["ac_mode"].eq("CENTRAL")
+    merged.loc[central_mask, "ac_units_act"] = 0
+    merged.loc[central_mask, "ac_remotes_act"] = 0
     merged["inventory_checked"] = merged["checked_at"].notna().fillna(False).astype(bool) if "checked_at" in merged.columns else False
 
     for field in INVENTORY_FIELDS:
         merged[f"room_gap_{field}"] = merged[f"{field}_act"] - merged[f"{field}_req"]
         merged[f"gap_{field}"] = merged[f"room_gap_{field}"]
 
-    unit_keys = merged["standard_unit_id"].astype(str).str.strip().mask(lambda s: s == "", merged["apartment"])
-    merged["standard_unit_id"] = unit_keys
-    labels = merged["standard_unit_label"].astype(str).str.strip().mask(lambda s: s == "", merged["standard_unit_id"])
-    merged["standard_unit_label"] = labels
+    unit_keys = merged["standard_unit_id"].astype(str).str.strip()
+    merged["standard_unit_id"] = unit_keys.mask(unit_keys == "", merged["apartment"])
+    labels = merged["standard_unit_label"].astype(str).str.strip()
+    merged["standard_unit_label"] = labels.mask(labels == "", merged["standard_unit_id"])
 
     grouped = merged.groupby("standard_unit_id", sort=False, dropna=False)
     for field in INVENTORY_FIELDS:
@@ -126,20 +120,16 @@ def compute_gaps(req_df: pd.DataFrame, act_df: pd.DataFrame, mode: str = "std") 
         if not bool(row["inventory_checked"]):
             return "לא נבדק"
         gaps = [row[f"room_gap_{field}"] for field in INVENTORY_FIELDS]
-        if any(g < 0 for g in gaps):
-            return "חסר בחדר"
-        if any(g > 0 for g in gaps):
-            return "עודף בחדר"
+        if any(g < 0 for g in gaps): return "חסר בחדר"
+        if any(g > 0 for g in gaps): return "עודף בחדר"
         return "תקין בחדר"
 
     def unit_status(row: pd.Series) -> str:
         if not bool(row["unit_inventory_complete"]):
             return "הצמד נבדק חלקית" if bool(row["unit_inventory_partial"]) else "הצמד טרם נבדק"
         gaps = [row[f"unit_gap_{field}"] for field in INVENTORY_FIELDS]
-        if any(g < 0 for g in gaps):
-            return "חסר בצמד"
-        if any(g > 0 for g in gaps):
-            return "עודף בצמד"
+        if any(g < 0 for g in gaps): return "חסר בצמד"
+        if any(g > 0 for g in gaps): return "עודף בצמד"
         return "תקין בצמד"
 
     merged["room_status"] = merged.apply(room_status, axis=1)
