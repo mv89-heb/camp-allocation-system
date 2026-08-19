@@ -38,6 +38,21 @@ class ActualInventoryUpdate(BaseModel):
         return value
 
 
+class RoomCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
+    beds_std: NonNegativeInt = 4
+    mattresses_std: NonNegativeInt = 4
+    closets_std: NonNegativeInt = 4
+    ac_units_std: NonNegativeInt = 4
+    ac_remotes_std: NonNegativeInt = 1
+    beds_plan: NonNegativeInt = 6
+    mattresses_plan: NonNegativeInt = 6
+    closets_plan: NonNegativeInt = 6
+    ac_units_plan: NonNegativeInt = 4
+    ac_remotes_plan: NonNegativeInt = 1
+
+
 class GroupAllocationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=120)
