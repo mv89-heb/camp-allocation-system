@@ -15,6 +15,8 @@ class RoomCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     apartment: str = Field(min_length=1, max_length=120, pattern=r"^[0-9A-Za-z\u0590-\u05FF ._/#-]+$")
+    standard_unit_id: str | None = Field(default=None, min_length=1, max_length=120)
+    standard_unit_label: str | None = Field(default=None, min_length=1, max_length=240)
     beds_std: int = Field(default=4, ge=0, le=1000)
     mattresses_std: int = Field(default=4, ge=0, le=1000)
     closets_std: int = Field(default=4, ge=0, le=1000)
@@ -35,9 +37,13 @@ def create_room(data: RoomCreateRequest, db: Session = Depends(get_db)):
     if db.scalar(select(ActualDB).where(ActualDB.apartment == apartment)) is not None:
         raise HTTPException(status_code=409, detail="החדר כבר קיים במערכת")
 
+    unit_id = (data.standard_unit_id or apartment).strip()
+    unit_label = (data.standard_unit_label or unit_id).strip()
     now = utc_now()
     req = RequirementDB(
         apartment=apartment,
+        standard_unit_id=unit_id,
+        standard_unit_label=unit_label,
         beds_std=data.beds_std,
         mattresses_std=data.mattresses_std,
         closets_std=data.closets_std,
@@ -60,28 +66,28 @@ def create_room(data: RoomCreateRequest, db: Session = Depends(get_db)):
         checked_by=None,
     )
     db.add_all([req, actual])
-    db.add(
-        InventoryAuditDB(
-            apartment=apartment,
-            changed_at=now,
-            changed_by="room-management",
-            previous_values=None,
-            new_values={
-                "action": "ROOM_CREATED",
-                "apartment": apartment,
-                "beds_std": data.beds_std,
-                "mattresses_std": data.mattresses_std,
-                "closets_std": data.closets_std,
-                "ac_units_std": data.ac_units_std,
-                "ac_remotes_std": data.ac_remotes_std,
-                "beds_plan": data.beds_plan,
-                "mattresses_plan": data.mattresses_plan,
-                "closets_plan": data.closets_plan,
-                "ac_units_plan": data.ac_units_plan,
-                "ac_remotes_plan": data.ac_remotes_plan,
-            },
-        )
-    )
+    db.add(InventoryAuditDB(
+        apartment=apartment,
+        changed_at=now,
+        changed_by="room-management",
+        previous_values=None,
+        new_values={
+            "action": "ROOM_CREATED",
+            "apartment": apartment,
+            "standard_unit_id": unit_id,
+            "standard_unit_label": unit_label,
+            "beds_std": data.beds_std,
+            "mattresses_std": data.mattresses_std,
+            "closets_std": data.closets_std,
+            "ac_units_std": data.ac_units_std,
+            "ac_remotes_std": data.ac_remotes_std,
+            "beds_plan": data.beds_plan,
+            "mattresses_plan": data.mattresses_plan,
+            "closets_plan": data.closets_plan,
+            "ac_units_plan": data.ac_units_plan,
+            "ac_remotes_plan": data.ac_remotes_plan,
+        },
+    ))
     try:
         db.commit()
     except IntegrityError:
@@ -91,6 +97,8 @@ def create_room(data: RoomCreateRequest, db: Session = Depends(get_db)):
     return {
         "status": "created",
         "apartment": apartment,
+        "standard_unit_id": unit_id,
+        "standard_unit_label": unit_label,
         "inventory_checked": False,
         "actual": {"beds": 0, "mattresses": 0, "closets": 0, "ac_units": 0, "ac_remotes": 0},
     }
