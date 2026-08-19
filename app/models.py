@@ -11,6 +11,7 @@ APARTMENT_PATTERN = r"^[0-9A-Za-z\u0590-\u05FF ._/#-]+$"
 DAMAGE_CATEGORIES = {"FURNITURE", "ELECTRICAL", "PLUMBING", "STRUCTURE", "CLEANLINESS", "HVAC", "OTHER"}
 DAMAGE_SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 DAMAGE_STATUSES = {"OPEN", "INSPECTION", "IN_PROGRESS", "RESOLVED", "CLOSED"}
+AC_MODES = {"CENTRAL", "INDIVIDUAL"}
 STATUS_TRANSITIONS = {"OPEN": {"OPEN", "INSPECTION", "IN_PROGRESS"}, "INSPECTION": {"INSPECTION", "IN_PROGRESS", "OPEN"}, "IN_PROGRESS": {"IN_PROGRESS", "RESOLVED", "OPEN"}, "RESOLVED": {"RESOLVED", "CLOSED", "IN_PROGRESS"}, "CLOSED": {"CLOSED", "IN_PROGRESS"}}
 
 class ActualInventoryUpdate(BaseModel):
@@ -21,6 +22,7 @@ class ActualInventoryUpdate(BaseModel):
     closets: NonNegativeInt = 0
     ac_units: NonNegativeInt = 0
     ac_remotes: NonNegativeInt = 0
+    ac_control_boxes: NonNegativeInt = 0
 
 class RoomCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -28,13 +30,24 @@ class RoomCreateRequest(BaseModel):
     beds_std: NonNegativeInt = 4
     mattresses_std: NonNegativeInt = 4
     closets_std: NonNegativeInt = 4
-    ac_units_std: NonNegativeInt = 4
-    ac_remotes_std: NonNegativeInt = 1
+    ac_mode: str = "CENTRAL"
+    ac_units_std: NonNegativeInt = 0
+    ac_remotes_std: NonNegativeInt = 0
+    ac_control_boxes_std: NonNegativeInt = 1
     beds_plan: NonNegativeInt = 6
     mattresses_plan: NonNegativeInt = 6
     closets_plan: NonNegativeInt = 6
-    ac_units_plan: NonNegativeInt = 4
-    ac_remotes_plan: NonNegativeInt = 1
+    ac_units_plan: NonNegativeInt = 0
+    ac_remotes_plan: NonNegativeInt = 0
+    ac_control_boxes_plan: NonNegativeInt = 1
+
+    @field_validator("ac_mode")
+    @classmethod
+    def validate_ac_mode(cls, value: str) -> str:
+        value = value.upper()
+        if value not in AC_MODES:
+            raise ValueError("ac_mode must be CENTRAL or INDIVIDUAL")
+        return value
 
 class GroupAllocationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -124,3 +137,10 @@ class HealthResponse(BaseModel):
     status: str
     database: str
     timestamp: datetime
+
+class WhatsAppLinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    apartment: str = Field(min_length=1, max_length=120, pattern=APARTMENT_PATTERN)
+    reporter_name: str = Field(default="", max_length=120)
+    damages: list[dict] = Field(default_factory=list, max_length=20)
+    inventory: dict = Field(default_factory=dict)
